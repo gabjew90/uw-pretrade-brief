@@ -20,9 +20,9 @@ A Streamlit web app that scans a watchlist of ~15–30 tickers and shows, for ea
 
 **Layout** (top → bottom on one Streamlit page — single layout, no breakpoints):
 
-- **Sidebar**: comma-separated watchlist override input, "Refresh data" button, "Data as of HH:MM" indicator, session call-count display, "How this works" expander link.
-- **Top: pinned ticker card** — empty by default with the prompt **"Tap a row below to see detailed analysis."** Auto-populates if the URL contains `?ticker=X`. When populated: AI synthesis at the top (1–2 sentences), then three charts stacked vertically (net dealer gamma profile, flow timeline, IV term-structure / skew), then a small key-strikes table. An "Unpin" (✕) control clears the pinned card and removes the URL param.
-- **Bottom: scan table** — 10 rows by default (user's fixed list trimmed + UW "hot today" leaders), with a "Load 10 more" button below revealing the next batch (cap at 30 total). Each row: symbol, AI synthesis as the headline, pattern badges (per-pattern colored, non-firing patterns hidden, tooltip on each). Two-phase render: numerical badges paint in pass 1 as UW data arrives, AI synthesis text fills in per row in pass 2 as Gemini completes. Currently-pinned row gets a left-border accent. Click row → loads it into the pinned card; URL updates to `?ticker=X`.
+- **Sidebar**: comma-separated watchlist override input, "Refresh data" button, "Data as of HH:MM" indicator, session call-count display, "How this works" expander link, **"v0.1 calibration values" debug panel** showing the current pattern-detection thresholds (transparency: badges that "fire" are firing per these heuristics, not per a validated model).
+- **Top: pinned ticker card** — empty by default with the prompt **"Tap a row below to see detailed analysis."** Auto-populates if the URL contains `?ticker=X`. When populated: AI synthesis at the top (1–2 sentences), then three charts stacked vertically (**net dealer gamma profile**, **open interest per strike** showing call/put walls and current spot, **IV term-structure**), then a small key-strikes table. An "Unpin" (✕) control clears the pinned card and removes the URL param. *(Note: flow timeline was swapped for OI-per-strike because the FLOW data is already conveyed in the row badge — the OI chart adds the structural-levels view that was missing.)*
+- **Bottom: scan table** — 10 rows by default (user's fixed list trimmed + UW "hot today" leaders), with a "Load 10 more" button below revealing the next batch (cap at 30 total). Each row: a **source indicator** (📌 = user's fixed list, 🔥 = UW hot today), symbol, AI synthesis as the headline, pattern badges (per-pattern colored, non-firing patterns hidden, tooltip on each). Two-phase render: numerical badges paint in pass 1 as UW data arrives, AI synthesis text fills in per row in pass 2 as Gemini completes. Currently-pinned row gets a left-border accent. Click row → loads it into the pinned card; URL updates to `?ticker=X`.
 
 **Approaches considered and rejected:**
 - *B (multi-page app)*: cleaner long-term, but +30–50% build time risks the Sunday deadline; worse phone UX (context-loss on page switch).
@@ -84,11 +84,12 @@ Streamlit lives only at the edge. Everything else is testable without it. `patte
 **Session lifecycle on a fresh page load:**
 
 1. `watchlist.get_tickers()` → resolves `fixed_list ∪ uw_hot_today()`, deduped. First-pass cap: 10 (default visible batch). "Load 10 more" button extends the visible set in batches up to a hard cap of 30.
-2. For each ticker, `uw_client` fetches four data shapes concurrently via `ThreadPoolExecutor`:
-   - per-strike net dealer gamma
-   - recent flow records (side, premium, time)
-   - IV term-structure samples
-   - key-strikes table
+2. For each ticker, `uw_client` fetches five data shapes concurrently via `ThreadPoolExecutor`:
+   - per-strike net dealer gamma (for gamma profile chart + pinning/squeeze detection)
+   - per-strike open interest, calls + puts split (for OI chart + key-strikes table)
+   - recent flow records (side, premium, time) — used only for the FLOW badge, not a chart
+   - IV term-structure samples (for IV chart + vol-regime detection)
+   - max-pain / key-strikes scalar (for the key-strikes table below the charts)
 3. For each ticker, `patterns.detect_all(data)` → pure verdict dict:
    ```python
    {
@@ -208,7 +209,9 @@ The screenshot in `README.md` is the portfolio's primary visual. Specifying the 
 
 **Model**: `gemini-3.1-flash-lite` via the **`google-genai`** Python SDK (the new SDK, not legacy `google-generativeai`). Call pattern: `client.models.generate_content(model="gemini-3.1-flash-lite", contents=..., config=...)`.
 
-**Prompt**: single combined prompt, ~300 tokens of instruction + per-call payload (ticker + patterns dict + key_numbers dict). No system/user split.
+**Prompt**: single combined prompt, ~400 tokens of instruction + per-call payload (ticker + patterns dict + key_numbers dict). No system/user split.
+
+**Critical prompt rule (per post-review revision):** the synthesis must NOT restate badge values. Badges already show which patterns fire and the key numbers. The synthesis is required to add information the badges don't convey: cross-pattern tension (e.g. "strong bullish flow against a positive-gamma regime → fighting dealers"), context (e.g. "earnings tomorrow, vol elevated for that reason"), or a structural implication. If the model cannot produce non-restatement content, it MUST return the empty string — the deterministic fallback then renders instead.
 
 **Caching note**: Gemini `CachedContent` has a 32K-token minimum prefix; our prompt is ~300 tokens, so Gemini context caching does not apply. Per-request cost stays at full Flash Lite rates. Mitigated by our own per-ticker output cache (see § 4).
 

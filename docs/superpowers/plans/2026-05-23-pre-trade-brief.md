@@ -1188,7 +1188,9 @@ git add src/patterns.py tests/test_patterns.py
 git commit -m "feat(patterns): flow conviction detector + tests"
 ```
 
-### Task 3.5: Vol regime detector
+### Task 3.5: Vol regime detector (IV term-structure inversion)
+
+Redefined per product-review item #3: "IV rank elevated" was too fuzzy — IVR 80 in a tight range means something very different from IVR 80 going into earnings. The sharp, tradeable signal for weekly options is **front-week vs monthly IV inversion**: when front-week IV exceeds 30-day IV by ≥5 vol points, the market is pricing event-driven near-term richness (earnings, FOMC, scheduled catalyst).
 
 **Files:**
 - Modify: `src/patterns.py`
@@ -1201,22 +1203,24 @@ Append to `tests/test_patterns.py`:
 from src.patterns import detect_vol_regime
 
 
-def test_vol_regime_elevated_iv():
-    """IV rank ≥75 → premium-selling regime fires."""
-    v = detect_vol_regime(iv_rank=82.0)
+def test_vol_regime_inverted_front_week_event_driven():
+    """Front-week IV >> 30-day IV → event-driven richness, firing."""
+    term = [{"dte": 4, "iv": 0.48}, {"dte": 30, "iv": 0.32}]   # 16 vol-pt premium
+    v = detect_vol_regime(term)
     assert v.firing is True
-    assert v.note["regime"] == "elevated"
+    assert v.note["regime"] == "event_driven"
+    assert v.note["front_minus_30d_pts"] >= 5
 
 
-def test_vol_regime_crushed_iv():
-    """IV rank ≤25 → premium-buying regime fires."""
-    v = detect_vol_regime(iv_rank=18.0)
-    assert v.firing is True
-    assert v.note["regime"] == "crushed"
+def test_vol_regime_normal_term_structure_does_not_fire():
+    """Front-week IV ≈ 30-day IV → calendar normal, not firing."""
+    term = [{"dte": 4, "iv": 0.22}, {"dte": 30, "iv": 0.21}]
+    v = detect_vol_regime(term)
+    assert v.firing is False
 
 
-def test_vol_regime_middle_iv_does_not_fire():
-    v = detect_vol_regime(iv_rank=50.0)
+def test_vol_regime_empty_term_structure():
+    v = detect_vol_regime([])
     assert v.firing is False
 ```
 
@@ -1229,29 +1233,53 @@ Expected: FAIL on vol_regime tests.
 
 Append to `src/patterns.py`:
 ```python
-# ---------- Vol regime ----------
-# Thesis: front-week IV vs historical range → premium-selling favored at high IVR,
-# premium-buying favored at low IVR.
+# ---------- Vol regime (IV term-structure inversion) ----------
+# Thesis: front-week IV elevated relative to 30-day IV → market pricing
+# event-driven near-term richness (earnings, FOMC, scheduled catalyst).
+# Tradeable: premium-selling on the front week if you're skeptical of the
+# catalyst; premium-buying if you want exposure to it.
 #
-# Heuristic (initial):
-#   - "elevated"  if IV rank >= 75
-#   - "crushed"   if IV rank <= 25
-#   - intensity = distance from 50 as a [0,1] fraction (saturating at distance 50)
+# Heuristic (initial — calibrate during build):
+#   - "event_driven" if front-week IV (DTE ≤ 7) - 30-day IV >= 5 vol points
+#   - intensity = min(1.0, (front - 30d) / 15) — full intensity at 15+ pt inversion
 
-VOL_ELEVATED = 75.0
-VOL_CRUSHED = 25.0
+VOL_INVERSION_THRESHOLD_PTS = 5.0
+VOL_INVERSION_FULL_INTENSITY_PTS = 15.0
 
 
-def detect_vol_regime(iv_rank: float | None) -> Verdict:
-    if iv_rank is None:
-        return Verdict("vol_regime", False, 0.0, {"reason": "missing_iv_rank"})
-    if iv_rank >= VOL_ELEVATED:
-        intensity = min(1.0, (iv_rank - 50) / 50)
-        return Verdict("vol_regime", True, intensity, {"regime": "elevated", "iv_rank": iv_rank})
-    if iv_rank <= VOL_CRUSHED:
-        intensity = min(1.0, (50 - iv_rank) / 50)
-        return Verdict("vol_regime", True, intensity, {"regime": "crushed", "iv_rank": iv_rank})
-    return Verdict("vol_regime", False, 0.0, {"regime": "neutral", "iv_rank": iv_rank})
+def detect_vol_regime(term_structure: list[dict]) -> Verdict:
+    """
+    `term_structure` is the list returned by uw_client.term_structure():
+    [{"dte": int, "iv": float}, ...], sorted by dte ascending.
+    """
+    if not term_structure:
+        return Verdict("vol_regime", False, 0.0, {"reason": "empty_term_structure"})
+
+    # Front-week IV: any entry with dte <= 7
+    front = next((e["iv"] for e in term_structure if e["dte"] <= 7), None)
+    # 30-day IV: closest entry to dte=30
+    monthly = None
+    if term_structure:
+        monthly_entry = min(term_structure, key=lambda e: abs(e["dte"] - 30))
+        if abs(monthly_entry["dte"] - 30) <= 10:  # within 20-40 dte window
+            monthly = monthly_entry["iv"]
+
+    if front is None or monthly is None:
+        return Verdict("vol_regime", False, 0.0, {"reason": "missing_front_or_30d"})
+
+    # IV expressed as decimal (0.32 = 32%). Convert delta to vol POINTS (×100).
+    delta_pts = (front - monthly) * 100
+    note = {
+        "front_iv": round(front, 4),
+        "iv_30d": round(monthly, 4),
+        "front_minus_30d_pts": round(delta_pts, 2),
+    }
+
+    if delta_pts >= VOL_INVERSION_THRESHOLD_PTS:
+        intensity = min(1.0, delta_pts / VOL_INVERSION_FULL_INTENSITY_PTS)
+        return Verdict("vol_regime", True, intensity,
+                       {"regime": "event_driven", **note})
+    return Verdict("vol_regime", False, 0.0, {"regime": "normal", **note})
 ```
 
 - [ ] **Step 4: Run — PASS**
@@ -1263,7 +1291,7 @@ Expected: 11 tests pass.
 
 ```bash
 git add src/patterns.py tests/test_patterns.py
-git commit -m "feat(patterns): vol regime detector + tests"
+git commit -m "feat(patterns): vol regime via IV term-structure inversion"
 ```
 
 ### Task 3.6: Aggregator + IV-rank extractor
@@ -1285,7 +1313,7 @@ def test_detect_all_returns_four_verdicts():
         gex_recs=[{"strike": 100.0, "gamma": 1e6}],
         flow_recs=[],
         spot=100.0,
-        iv_rank=50.0,
+        term_structure=[{"dte": 4, "iv": 0.22}, {"dte": 30, "iv": 0.21}],
     )
     assert set(bundle.keys()) == {"pinning", "gamma_squeeze", "flow", "vol_regime"}
     for v in bundle.values():
@@ -1302,13 +1330,13 @@ def detect_all(
     gex_recs: list[dict],
     flow_recs: list[dict],
     spot: float,
-    iv_rank: float | None,
+    term_structure: list[dict],
 ) -> dict[PatternKind, Verdict]:
     return {
         "pinning":       detect_pinning(gex_recs, spot),
         "gamma_squeeze": detect_gamma_squeeze(gex_recs, spot),
         "flow":          detect_flow(flow_recs),
-        "vol_regime":    detect_vol_regime(iv_rank),
+        "vol_regime":    detect_vol_regime(term_structure),
     }
 ```
 
@@ -1439,101 +1467,161 @@ git add src/charts.py tests/test_charts.py
 git commit -m "feat(charts): gamma profile builder + tests"
 ```
 
-### Task 4.2: Flow timeline chart
+### Task 4.2: Open-interest-per-strike chart
+
+Swapped in for the flow timeline per product-review item #5: the FLOW badge in each scan row already conveys flow direction and size, so a flow timeline chart in the pinned card was partially redundant. The structural levels for a weekly trade (call wall, put wall, max pain) are what the user actually needs to see in the drill-down. OI-per-strike surfaces those directly.
 
 **Files:**
+- Modify: `src/uw_client.py` (new endpoint + parser)
 - Modify: `src/charts.py`
 - Modify: `tests/test_charts.py`
+- Modify: `scripts/probe_uw.py` (add the new endpoint to the probe)
+- Modify: `scripts/record_fixtures.py` (record OI fixture)
 
-- [ ] **Step 1: Write failing test**
+- [ ] **Step 1: Add the OI endpoint to `uw_client.py`**
+
+Append to `src/uw_client.py`:
+```python
+def fetch_oi_strike(ticker: str) -> dict:
+    """Per-strike open interest, calls + puts split."""
+    return _get(f"/api/stock/{ticker}/oi-per-strike")
+
+
+def oi_records(payload) -> list[dict]:
+    """Return list of {strike: float, call_oi: int, put_oi: int} dicts."""
+    rows = _unwrap(payload)
+    out = []
+    for r in rows:
+        strike = r.get("strike") or r.get("strike_price")
+        if strike is None:
+            continue
+        call_oi = int(r.get("call_oi") or r.get("calls_oi") or r.get("call_open_interest") or 0)
+        put_oi = int(r.get("put_oi") or r.get("puts_oi") or r.get("put_open_interest") or 0)
+        out.append({"strike": float(strike), "call_oi": call_oi, "put_oi": put_oi})
+    return sorted(out, key=lambda x: x["strike"])
+```
+
+- [ ] **Step 2: Add the OI probe to `scripts/probe_uw.py`**
+
+In the PROBES list in `scripts/probe_uw.py`, add:
+```python
+    ("oi_strike",   lambda: uw_client.fetch_oi_strike(TICKER)),
+```
+
+Run: `uv run python scripts/probe_uw.py SPY`
+Expected: oi_strike returns data. If 404, check UW docs for the correct path (e.g. `/api/stock/{ticker}/option-chains` might bundle OI). Update both the client and the probe.
+
+- [ ] **Step 3: Add to fixture recorder**
+
+In `scripts/record_fixtures.py` JOBS list, add:
+```python
+    ("oi_strike",   uw_client.fetch_oi_strike, True),
+```
+
+Run: `uv run python scripts/record_fixtures.py SPY`
+Expected: `tests/fixtures/uw_oi_strike_SPY.json` exists.
+
+- [ ] **Step 4: Add the conftest fixture loader**
+
+In `tests/conftest.py`, append a new fixture:
+```python
+@pytest.fixture
+def oi_strike_spy():
+    return _load("uw_oi_strike_SPY.json")
+```
+
+- [ ] **Step 5: Write the chart's failing test**
 
 Append to `tests/test_charts.py`:
 ```python
-from src.charts import flow_timeline_figure
+from src.charts import oi_per_strike_figure
 
 
-def test_flow_timeline_returns_figure():
+def test_oi_per_strike_returns_figure():
     records = [
-        {"side": "call", "premium_usd": 100_000, "ts": "2026-05-23T15:00:00Z"},
-        {"side": "put",  "premium_usd":  50_000, "ts": "2026-05-23T15:01:00Z"},
+        {"strike": 100.0, "call_oi": 5000, "put_oi": 1200},
+        {"strike": 105.0, "call_oi": 8000, "put_oi": 800},   # call wall
+        {"strike":  95.0, "call_oi":  600, "put_oi": 7500},  # put wall
     ]
-    fig = flow_timeline_figure(records, ticker="TEST")
+    fig = oi_per_strike_figure(records, spot=100.0, max_pain=100.0, ticker="TEST")
     assert isinstance(fig, go.Figure)
 
 
-def test_flow_timeline_empty_returns_empty_figure():
-    fig = flow_timeline_figure([], ticker="TEST")
+def test_oi_per_strike_empty_returns_empty_figure():
+    fig = oi_per_strike_figure([], spot=100.0, max_pain=None, ticker="TEST")
     assert isinstance(fig, go.Figure)
 ```
 
-- [ ] **Step 2: Implement**
+- [ ] **Step 6: Implement**
 
 Append to `src/charts.py`:
 ```python
-from datetime import datetime
-
-
-def _parse_ts(s: str | None) -> datetime | None:
-    if not s:
-        return None
-    try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
-def flow_timeline_figure(flow_recs: list[dict], ticker: str) -> go.Figure:
-    """Scatter of flow prints over time, colored by side, sized by premium."""
+def oi_per_strike_figure(
+    oi_recs: list[dict],
+    spot: float,
+    max_pain: float | None,
+    ticker: str,
+) -> go.Figure:
+    """Grouped bar chart: call OI vs put OI per strike, with vlines at spot + max pain."""
     fig = go.Figure()
-    if not flow_recs:
-        fig.add_annotation(text="No flow data", showarrow=False, x=0.5, y=0.5, xref="paper", yref="paper")
-        fig.update_layout(title=f"{ticker} — recent flow", height=280, margin=dict(l=20, r=20, t=40, b=20))
+    if not oi_recs:
+        fig.add_annotation(text="No OI data", showarrow=False, x=0.5, y=0.5, xref="paper", yref="paper")
+        fig.update_layout(title=f"{ticker} — open interest by strike", height=280, margin=dict(l=20, r=20, t=40, b=20))
         return fig
 
-    sides = []
-    times = []
-    sizes = []
-    prems = []
-    for r in flow_recs:
-        ts = _parse_ts(r.get("ts"))
-        if ts is None:
-            continue
-        sides.append(r["side"])
-        times.append(ts)
-        # Marker size: log-scaled premium between 6 and 30
-        p = max(1.0, float(r["premium_usd"]))
-        sizes.append(min(30, max(6, 6 + (p / 100_000))))
-        prems.append(p)
+    strikes = [r["strike"] for r in oi_recs]
+    calls = [r["call_oi"] for r in oi_recs]
+    puts = [-r["put_oi"] for r in oi_recs]   # negative so puts render below the axis
 
-    colors = ["#9ECE6A" if s == "call" else "#F7768E" for s in sides]
-    fig.add_trace(go.Scatter(
-        x=times, y=prems, mode="markers",
-        marker=dict(size=sizes, color=colors, line=dict(width=0)),
-        hovertemplate="%{x}<br>$%{y:,.0f}<extra></extra>",
-    ))
+    fig.add_trace(go.Bar(x=strikes, y=calls, marker_color="#9ECE6A", name="Call OI"))
+    fig.add_trace(go.Bar(x=strikes, y=puts, marker_color="#F7768E", name="Put OI"))
+    if spot:
+        fig.add_vline(x=spot, line_color="#E0AF68", line_dash="dash",
+                      annotation_text=f"spot {spot:.2f}", annotation_position="top")
+    if max_pain:
+        fig.add_vline(x=max_pain, line_color="#BB9AF7", line_dash="dot",
+                      annotation_text=f"max pain {max_pain:.2f}", annotation_position="bottom")
+
     fig.update_layout(
-        title=f"{ticker} — recent flow (calls=green, puts=red)",
-        xaxis_title="Time",
-        yaxis_title="Premium ($)",
-        yaxis_type="log",
+        title=f"{ticker} — open interest by strike (calls above / puts below)",
+        xaxis_title="Strike",
+        yaxis_title="OI contracts (puts shown negative)",
+        barmode="overlay",
         height=280,
         margin=dict(l=20, r=20, t=40, b=30),
         template="plotly_dark",
-        showlegend=False,
+        legend=dict(orientation="h", y=1.1),
     )
     return fig
 ```
 
-- [ ] **Step 3: Run — PASS**
+- [ ] **Step 7: Add a `max_pain_value` extractor in `uw_client.py`**
+
+Append:
+```python
+def max_pain_value(payload) -> float | None:
+    """Pull the max-pain strike from the max-pain endpoint payload."""
+    p = _unwrap(payload)
+    if isinstance(p, dict):
+        for k in ("max_pain", "max_pain_strike", "strike"):
+            if p.get(k) is not None:
+                return float(p[k])
+    if isinstance(p, list) and p:
+        # Some UW endpoints return a list of {expiry, strike}; pick the nearest expiry
+        return float(p[0].get("strike") or p[0].get("max_pain"))
+    return None
+```
+
+- [ ] **Step 8: Run — PASS**
 
 Run: `uv run pytest tests/test_charts.py -v`
-Expected: 4 tests pass.
+Expected: 4 chart tests pass (gamma profile + oi-per-strike, with empty-state cases).
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/charts.py tests/test_charts.py
-git commit -m "feat(charts): flow timeline builder"
+git add src/uw_client.py src/charts.py scripts/probe_uw.py scripts/record_fixtures.py tests/conftest.py tests/test_charts.py tests/fixtures/uw_oi_strike_SPY.json
+git commit -m "feat(charts): swap flow timeline for OI-per-strike chart"
 ```
 
 ### Task 4.3: Vol / skew chart
@@ -1776,18 +1864,24 @@ FORBIDDEN_RE = re.compile(
 
 INSTRUCTION = """You write 1-2 sentence structural readouts of options data for a personal-use trading dashboard.
 
-The four patterns you may reference:
-- Pinning: heavy net dealer gamma concentrated at a strike near spot → price tends to stick to that strike into expiry.
-- Gamma squeeze: dealers net SHORT gamma at strikes above (or below) spot → if price crosses, dealers chase, amplifying the move.
-- Flow conviction: net premium directional and large → institutional positioning leaning that direction.
-- Vol regime: implied vol elevated (premium-selling favored) or crushed (premium-buying favored).
+The four patterns you may reference (these are already shown as colored BADGES next to each ticker, so do not just list them):
+- Pinning: heavy net dealer gamma concentrated at a strike near spot.
+- Gamma squeeze: dealers net SHORT gamma at strikes above or below spot.
+- Flow conviction: net premium directional and large.
+- Vol regime: front-week IV elevated vs 30-day IV (event-driven richness).
+
+YOUR JOB IS NOT TO RESTATE THE BADGES. The user can already see them. Your job is to add information the badges DO NOT convey:
+- Cross-pattern tension (e.g. "heavy call flow into a positive-gamma wall — buyers fighting the dealer hedge")
+- Context the data implies (e.g. "front-week IV spike with no flow conviction reads as scheduled-event hedging, not directional bet")
+- A structural relationship between two firing patterns
+- A notable absence (e.g. "pinning setup at 450 but no flow conviction — pin likely to hold absent a catalyst")
 
 RULES (strict):
-1. Output 1-2 short sentences. No bullet points. No labels.
-2. Use ONLY descriptive language. Forbidden words: buy, sell, short, long the, enter, exit, recommend, should, suggest, target.
-3. Reference at least one specific number from the payload.
-4. Name the firing pattern(s). If none fire, describe the structure neutrally.
-5. Do NOT predict direction, probability, or outcome. Describe what IS, not what WILL happen.
+1. Output 1-2 short sentences OR the literal string "NO_INSIGHT" if you cannot add information beyond what the badges show. NO_INSIGHT is preferred over a restatement.
+2. Use ONLY descriptive language. Forbidden words: buy, sell, short, long the, enter, exit, recommend, should, suggest, target, strong (buy|sell), high probability, likely to.
+3. If you do produce text, reference at least one specific number from the payload.
+4. Do NOT predict direction, probability, or outcome. Describe what IS, not what WILL happen.
+5. Do NOT enumerate firing pattern names — the badges do that. Reference a pattern only as part of a relationship or context point.
 """
 
 
@@ -1986,8 +2080,8 @@ from src.synth import summarize
 
 def test_summarize_uses_fallback_when_validation_fails(monkeypatch):
     """If Gemini returns prescriptive text, validator rejects → fallback used."""
-    def fake_call(prompt: str) -> str:
-        return "NVDA looks like a strong buy at 450."  # prescriptive → rejected
+    def fake_call(prompt: str):
+        return "NVDA looks like a strong buy at 450.", {}   # prescriptive → rejected
     monkeypatch.setattr("src.synth._call_gemini", fake_call)
 
     patterns = {
@@ -2001,9 +2095,10 @@ def test_summarize_uses_fallback_when_validation_fails(monkeypatch):
     assert "NVDA" in out
 
 
-def test_summarize_uses_gemini_when_validation_passes(monkeypatch):
-    def fake_call(prompt: str) -> str:
-        return "NVDA pinning at 450 with gamma concentrated. Flow neutral."
+def test_summarize_uses_fallback_when_no_insight(monkeypatch):
+    """If Gemini returns NO_INSIGHT sentinel, fallback is used."""
+    def fake_call(prompt: str):
+        return "NO_INSIGHT", {"input_tokens": 50, "output_tokens": 2}
     monkeypatch.setattr("src.synth._call_gemini", fake_call)
 
     patterns = {
@@ -2012,8 +2107,29 @@ def test_summarize_uses_gemini_when_validation_passes(monkeypatch):
         "flow":          {"firing": False, "intensity": 0.0, "note": {}},
         "vol_regime":    {"firing": False, "intensity": 0.0, "note": {}},
     }
-    out = summarize("NVDA", patterns, {"spot": 449.50, "iv_rank": 50})
-    assert "pinning" in out.lower()
+    out = summarize("NVDA", patterns, {"spot": 449.50})
+    assert "NVDA" in out
+    assert "NO_INSIGHT" not in out
+
+
+def test_summarize_uses_gemini_when_text_beats_fallback(monkeypatch):
+    """Substantive synthesis text (longer than fallback, has numbers) wins."""
+    def fake_call(prompt: str):
+        return (
+            "NVDA pinning at 450 sits inside heavy call OI at 460, suggesting buyers "
+            "are fighting the dealer hedge into expiry 4 days out.",
+            {"input_tokens": 200, "output_tokens": 30},
+        )
+    monkeypatch.setattr("src.synth._call_gemini", fake_call)
+
+    patterns = {
+        "pinning":       {"firing": True,  "intensity": 0.7, "note": {"strike": 450}},
+        "gamma_squeeze": {"firing": False, "intensity": 0.0, "note": {}},
+        "flow":          {"firing": False, "intensity": 0.0, "note": {}},
+        "vol_regime":    {"firing": False, "intensity": 0.0, "note": {}},
+    }
+    out = summarize("NVDA", patterns, {"spot": 449.50})
+    assert "fighting" in out.lower() or "buyers" in out.lower()
     assert "450" in out
 ```
 
@@ -2034,8 +2150,8 @@ def _get_gemini_key() -> str:
     return key
 
 
-def _call_gemini(prompt: str) -> str:
-    """Single Gemini call. Returns response text or raises."""
+def _call_gemini(prompt: str) -> tuple[str, dict]:
+    """Single Gemini call. Returns (response_text, usage_dict)."""
     from google import genai
     from google.genai import types
     client = genai.Client(api_key=_get_gemini_key())
@@ -2044,27 +2160,70 @@ def _call_gemini(prompt: str) -> str:
         contents=prompt,
         config=types.GenerateContentConfig(max_output_tokens=MAX_OUTPUT_TOKENS),
     )
-    return (resp.text or "").strip()
+    text = (resp.text or "").strip()
+    usage = {}
+    if hasattr(resp, "usage_metadata") and resp.usage_metadata:
+        usage = {
+            "input_tokens": getattr(resp.usage_metadata, "prompt_token_count", 0),
+            "output_tokens": getattr(resp.usage_metadata, "candidates_token_count", 0),
+        }
+    return text, usage
+
+
+def _substance_beats_fallback(synthesis: str, fallback: str) -> bool:
+    """Heuristic: synthesis is 'better than fallback' if it's at least as long AND
+    contains at least as many distinct numeric tokens. Else prefer fallback."""
+    import re as _re
+    def _numbers(s: str) -> set:
+        nums = set()
+        for m in _re.finditer(r"-?\d[\d,\.]*", s or ""):
+            try:
+                nums.add(float(m.group(0).replace(",", "")))
+            except ValueError:
+                pass
+        return nums
+    if not synthesis or not synthesis.strip():
+        return False
+    if len(synthesis) < len(fallback) * 0.7:
+        return False
+    if len(_numbers(synthesis)) < len(_numbers(fallback)):
+        return False
+    return True
 
 
 def summarize(ticker: str, patterns: dict, key_numbers: dict) -> str:
-    """Top-level: build prompt → call Gemini → validate → return text (or fallback)."""
+    """Build prompt → call Gemini → validate → substance-check vs fallback → return."""
     must_contain = [n for n in key_numbers.values() if isinstance(n, (int, float))]
-    # Also accept any specific number embedded in pattern notes.
     for p in patterns.values():
         for v in p.get("note", {}).values():
             if isinstance(v, (int, float)):
                 must_contain.append(v)
 
+    fallback = fallback_summary(ticker, patterns, key_numbers)
+
     try:
-        text = _call_gemini(build_prompt(ticker, patterns, key_numbers))
-    except Exception as e:
-        # Network / auth / quota failure → fallback
-        return fallback_summary(ticker, patterns, key_numbers)
+        text, usage = _call_gemini(build_prompt(ticker, patterns, key_numbers))
+    except Exception:
+        return fallback
+
+    # Token logging — print to stderr for build-time observability.
+    if usage:
+        import sys as _sys
+        print(f"[gemini] {ticker} in={usage.get('input_tokens',0)} out={usage.get('output_tokens',0)}",
+              file=_sys.stderr)
+
+    # NO_INSIGHT sentinel: model explicitly declined to add information beyond badges.
+    if text.strip().upper().startswith("NO_INSIGHT"):
+        return fallback
 
     ok, _reason = validate_output(text, must_contain_numbers=must_contain)
     if not ok:
-        return fallback_summary(ticker, patterns, key_numbers)
+        return fallback
+
+    # Substance check: if synthesis isn't materially better than fallback, use fallback.
+    if not _substance_beats_fallback(text, fallback):
+        return fallback
+
     return text
 ```
 
@@ -2114,18 +2273,21 @@ def test_uw_endpoints_respond_with_expected_shape():
 
 @pytest.mark.live
 def test_gemini_responds_within_validator_constraints():
-    """A real Gemini call on a synthetic payload produces validator-passing text."""
+    """A real Gemini call on a synthetic payload either passes validator or returns NO_INSIGHT."""
     from src.synth import build_prompt, validate_output
 
     patterns = {
         "pinning":       {"firing": True,  "intensity": 0.8, "note": {"strike": 450.0}},
         "gamma_squeeze": {"firing": False, "intensity": 0.0, "note": {}},
         "flow":          {"firing": False, "intensity": 0.0, "note": {}},
-        "vol_regime":    {"firing": False, "intensity": 0.0, "note": {"iv_rank": 50}},
+        "vol_regime":    {"firing": False, "intensity": 0.0, "note": {"front_minus_30d_pts": 2.0}},
     }
-    key_numbers = {"spot": 449.50, "max_gamma_strike": 450.0, "iv_rank": 50, "dte": 4}
-    text = _call_gemini(build_prompt("NVDA", patterns, key_numbers))
-    ok, reason = validate_output(text, must_contain_numbers=[450, 449.50, 50])
+    key_numbers = {"spot": 449.50, "max_gamma_strike": 450.0, "dte": 4}
+    text, _usage = _call_gemini(build_prompt("NVDA", patterns, key_numbers))
+    # NO_INSIGHT is an acceptable response — model explicitly declined to restate.
+    if text.strip().upper().startswith("NO_INSIGHT"):
+        return
+    ok, reason = validate_output(text, must_contain_numbers=[450, 449.50, 4])
     assert ok, f"live Gemini output failed validator: {reason}\noutput was: {text!r}"
 ```
 
@@ -2354,30 +2516,36 @@ class TickerData:
     iv_rank: float | None
     gex_recs: list[dict]
     flow_recs: list[dict]
+    oi_recs: list[dict]
     term: list[dict]
+    max_pain: float | None = None
     error: Optional[str] = None
 
 
 @st.cache_data(ttl=UW_TTL_S, show_spinner=False)
 def fetch_one(ticker: str) -> TickerData:
-    """Fetch all four UW endpoints for one ticker. Errors are captured, not raised."""
+    """Fetch all five UW endpoints for one ticker. Errors are captured, not raised."""
     try:
         vol = uw_client.fetch_volatility(ticker)
         gex = uw_client.fetch_gex_strike(ticker)
         flow = uw_client.fetch_flow_recent(ticker)
+        oi = uw_client.fetch_oi_strike(ticker)
+        mp = uw_client.fetch_max_pain(ticker)
         return TickerData(
             ticker=ticker,
             spot=uw_client.extract_spot(vol),
             iv_rank=uw_client.extract_iv_rank(vol),
             gex_recs=uw_client.gex_records(gex),
             flow_recs=uw_client.flow_records(flow),
+            oi_recs=uw_client.oi_records(oi),
             term=uw_client.term_structure(vol),
+            max_pain=uw_client.max_pain_value(mp),
         )
     except Exception as e:
         return TickerData(
             ticker=ticker, spot=None, iv_rank=None,
-            gex_recs=[], flow_recs=[], term=[],
-            error=f"{type(e).__name__}: {e}",
+            gex_recs=[], flow_recs=[], oi_recs=[], term=[],
+            max_pain=None, error=f"{type(e).__name__}: {e}",
         )
 
 
@@ -2403,7 +2571,7 @@ def patterns_for(td: TickerData) -> dict:
         gex_recs=td.gex_recs,
         flow_recs=td.flow_recs,
         spot=td.spot,
-        iv_rank=td.iv_rank,
+        term_structure=td.term,
     )
     return {k: v.to_dict() for k, v in bundle.items()}
 ```
@@ -2604,7 +2772,8 @@ def render(ticker: str, td: fetch.TickerData, synthesis: str, patterns: dict):
         use_container_width=True,
     )
     st.plotly_chart(
-        charts.flow_timeline_figure(td.flow_recs, ticker=ticker),
+        charts.oi_per_strike_figure(td.oi_recs, spot=td.spot or 0,
+                                    max_pain=td.max_pain, ticker=ticker),
         use_container_width=True,
     )
     st.plotly_chart(
@@ -2738,6 +2907,85 @@ Restart streamlit. Tickers list should now include UW's hot tickers after the fi
 ```bash
 git add src/fetch.py app.py
 git commit -m "feat(app): merge UW hot-today tickers into the watchlist"
+```
+
+### Task 7.7b: Source indicator on scan rows (📌 user list vs 🔥 hot today)
+
+Per product-review item #4: the merged watchlist confuses "tickers I always watch" with "tickers UW says are hot today." A small icon distinguishes them so the user knows what they're looking at.
+
+**Files:**
+- Modify: `app.py`
+- Modify: `src/views/scan_table.py`
+
+- [ ] **Step 1: Compute the source map in `app.py`**
+
+In `app.py`, after `hot = fetch.fetch_hot_tickers(15)`:
+```python
+fixed_set = {t.upper() for t in fixed}
+hot_set = {t.upper() for t in hot}
+def _source_icon(t: str) -> str:
+    t = t.upper()
+    if t in fixed_set:
+        return "📌"   # user's fixed list
+    if t in hot_set:
+        return "🔥"   # UW hot today
+    return ""
+```
+
+- [ ] **Step 2: Thread it through to the scan table renderer**
+
+In the row-build block in `app.py`, add the source to each row dict:
+```python
+prelim_rows.append({
+    "ticker": t,
+    "source_icon": _source_icon(t),
+    "patterns": pats,
+    "spot": td.spot,
+    "iv_rank": td.iv_rank,
+})
+```
+
+- [ ] **Step 3: Update `src/views/scan_table.py` to render the icon**
+
+In `render()`, change the dataframe construction to prepend the source icon to the ticker column:
+```python
+df = pd.DataFrame([{
+    "Ticker": f"{r.get('source_icon','')} {r['ticker']}".strip(),
+    "Analysis": r["synthesis"],
+} for r in rows])
+```
+
+And in the per-row badge loop:
+```python
+for r in rows:
+    prefix = "▶ " if r["ticker"] == pinned else "  "
+    icon = r.get("source_icon", "")
+    st.markdown(
+        f"{prefix}{icon} **{r['ticker']}** {_badges_md(r['patterns'])}",
+        unsafe_allow_html=True,
+    )
+```
+
+- [ ] **Step 4: Add a legend caption above the scan table**
+
+In `app.py`, just before `clicked = scan_table.render(...)`:
+```python
+st.caption("📌 = your fixed list · 🔥 = UW hot today")
+```
+
+- [ ] **Step 5: Restart and verify**
+
+Restart streamlit. Confirm:
+- Tickers from the default fixed list show 📌
+- Tickers added by UW hot-today show 🔥
+- Tickers that appear in BOTH show 📌 (fixed wins — it's the user's intention)
+- Legend caption is visible above the table
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add app.py src/views/scan_table.py
+git commit -m "feat(ui): source indicator distinguishing fixed-list vs hot-today tickers"
 ```
 
 ### Task 7.8: Two-phase synthesis render (single-paint with concurrent calls)
@@ -2888,12 +3136,13 @@ In `app.py`, update the call:
 clicked = scan_table.render(rows, pinned=st.session_state.get("pinned_ticker"))
 ```
 
-- [ ] **Step 2: Add staleness indicator + synth call counter in sidebar**
+- [ ] **Step 2: Add staleness indicator + synth call counter + threshold debug panel in sidebar**
 
 In `app.py`, near the sidebar code, after the Refresh button:
 ```python
 import datetime as _dt
 from src.fetch import SYNTH_SESSION_CALL_LIMIT
+from src import patterns as _patterns
 
 # Staleness
 last_refresh = st.session_state.get("last_refresh_ts")
@@ -2905,6 +3154,17 @@ st.caption(f"UW data: refreshed {last_refresh}")
 # Session synth call count (cost guard visibility per spec § 5)
 calls = st.session_state.get("synth_call_count", 0)
 st.caption(f"Gemini calls this session: {calls} / {SYNTH_SESSION_CALL_LIMIT}")
+
+# Threshold transparency (product-review item #1 / spec § 2)
+with st.expander("v0.1 calibration values"):
+    st.caption("These thresholds determine when each pattern badge 'fires'. They are heuristics, not validated by a model — visible here so you can interpret the badges honestly.")
+    st.code(f"""\
+Pinning concentration > {_patterns.PIN_THRESHOLD}
+Gamma squeeze ratio   > {_patterns.SQUEEZE_RATIO}x other side
+Flow min total $      > ${_patterns.FLOW_MIN_TOTAL:,}
+Flow min skew         > {_patterns.FLOW_MIN_SKEW}
+Vol inversion         > {_patterns.VOL_INVERSION_THRESHOLD_PTS} vol pts (front - 30d)\
+""", language="text")
 ```
 
 When the Refresh button fires, update:
@@ -2963,8 +3223,13 @@ Click any row to see the supporting charts (gamma profile, flow timeline, IV ter
 
 - Not a trade signal generator. No "buy this" calls, no conviction scores, no predictions.
 - Not a backtester. No claims of edge.
+- Not a journal — sessions don't persist; trade logging is intentionally not included (see [FUTURE_WORK.md](FUTURE_WORK.md)).
 - Not multi-user — UW Basic-tier API is personal-use-only.
 - Not real-time — 30-day lookback maximum, REST polling, no WebSocket.
+
+## Demo / API usage notice
+
+The live URL is intended for limited evaluation by the operator and a small audience. Unusual Whales' Basic-tier API is licensed for personal use; the demo is NOT a public service. Heavy traffic against the live URL would exhaust the API quota and likely violate UW's terms. If you're evaluating the project, please run a few queries and then explore the code instead of scripting traffic against the URL.
 
 ## How it works
 

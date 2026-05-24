@@ -18,6 +18,7 @@ Reviewed and pruned after the demo ships.
 
 ## Data & analytics
 
+- **Put/call IV skew chart in the pinned card** (deferred from product-review item #5b, 2026-05-23). Useful for directional weekly trades. Adding it would push the pinned card to 4 stacked charts — meaningful mobile-UX cost. Logged for v0.2.
 - **More than 30 tickers** — current hard cap. Lifting it requires UI for filtering/sorting at scale.
 - **WebSocket / true real-time updates** — UW Basic tier doesn't support WebSocket. Requires tier upgrade.
 - **Historical pattern detection beyond 30 days** — requires UW Pro tier.
