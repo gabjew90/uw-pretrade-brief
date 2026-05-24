@@ -415,9 +415,12 @@ def _get(path: str, params: dict | None = None) -> Any:
     return r.json()
 
 
-def fetch_greek_exposure_strike(ticker: str) -> dict:
-    """Per-strike Greek exposure (gamma + delta + charm + vanna) for the ticker."""
-    return _get(f"/api/stock/{ticker}/greek-exposure/strike")
+def fetch_spot_exposures_strike(ticker: str) -> dict:
+    """Per-strike Spot GEX — dealer-positioning gamma per strike, the canonical
+    'GEX' that drives pinning + gamma squeeze analysis. Returns directional
+    fields (call_gamma_oi, put_gamma_oi, *_ask, *_bid). Use OI-based for net
+    dealer positioning."""
+    return _get(f"/api/stock/{ticker}/spot-exposures/strike")
 
 
 def fetch_flow_alerts(ticker: str | None = None, limit: int = 50) -> dict:
@@ -476,7 +479,7 @@ from src import uw_client
 TICKER = sys.argv[1] if len(sys.argv) > 1 else "SPY"
 
 PROBES = [
-    ("greek_exposure_strike", lambda: uw_client.fetch_greek_exposure_strike(TICKER)),
+    ("spot_exposures_strike", lambda: uw_client.fetch_spot_exposures_strike(TICKER)),
     ("flow_alerts_ticker",    lambda: uw_client.fetch_flow_alerts(TICKER, limit=50)),
     ("volatility",            lambda: uw_client.fetch_volatility(TICKER)),
     ("max_pain",              lambda: uw_client.fetch_max_pain(TICKER)),
@@ -551,7 +554,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 
 # (label, callable, depends_on_ticker)
 JOBS = [
-    ("greek_exposure_strike", uw_client.fetch_greek_exposure_strike, True),
+    ("spot_exposures_strike", uw_client.fetch_spot_exposures_strike, True),
     ("flow_alerts",           lambda t: uw_client.fetch_flow_alerts(t, limit=50), True),
     ("volatility",            uw_client.fetch_volatility, True),
     ("max_pain",              uw_client.fetch_max_pain, True),
@@ -613,8 +616,10 @@ def _load(name: str):
 
 @pytest.fixture
 def gex_strike_spy():
-    """Per-strike Greek exposure for SPY (from /api/stock/SPY/greek-exposure/strike)."""
-    return _load("uw_greek_exposure_strike_SPY.json")
+    """Per-strike Spot GEX for SPY (from /api/stock/SPY/spot-exposures/strike).
+    The fixture name keeps the short 'gex_strike' label since GEX is the
+    conventional shorthand."""
+    return _load("uw_spot_exposures_strike_SPY.json")
 
 
 @pytest.fixture
@@ -752,27 +757,48 @@ def _unwrap(payload):
 def gex_records(payload) -> list[dict]:
     """Return list of {strike: float, gamma: float, ...} dicts.
 
-    UW's /greek-exposure/strike returns per-strike Greeks. Net gamma may be:
-      - a single field like 'gamma' / 'net_gamma' / 'gex' / 'gamma_dollars', OR
-      - split into 'call_gamma' / 'put_gamma' (typically gamma_call − gamma_put)
-    We try the single-field names first; if none match, we compute call − put.
+    UW's /spot-exposures/strike returns per-strike directional gamma. Per UW
+    docs: net dealer gamma per strike = call_gamma_oi - put_gamma_oi (OI-based,
+    standing positions). The directional volume variants (_ask, _bid) sum to
+    the full directionalized exposure.
+
+    This parser computes net gamma using OI fields if present; falls back to
+    summed directional fields; falls back to single-field aggregate names.
     """
     rows = _unwrap(payload)
     out = []
     for r in rows:
-        strike = float(r.get("strike") or r.get("strike_price"))
-        gamma = None
-        # 1. Single-field shape
-        for k in ("gamma_dollars", "net_gamma", "gex", "gamma"):
-            if r.get(k) is not None:
-                gamma = float(r[k])
-                break
-        # 2. Split call/put shape — common in UW Greek-exposure endpoints
-        if gamma is None:
-            call_g = r.get("call_gamma") or r.get("gamma_call") or r.get("call_gex")
-            put_g = r.get("put_gamma") or r.get("gamma_put") or r.get("put_gex")
-            if call_g is not None or put_g is not None:
-                gamma = float(call_g or 0) - float(put_g or 0)
+        strike = r.get("strike") or r.get("strike_price")
+        if strike is None:
+            continue
+        strike = float(strike)
+
+        # 1. OI-based net (canonical spot-exposures shape — preferred)
+        call_oi = r.get("call_gamma_oi")
+        put_oi = r.get("put_gamma_oi")
+        if call_oi is not None or put_oi is not None:
+            gamma = float(call_oi or 0) - float(put_oi or 0)
+        else:
+            # 2. Directional-volume sum (alternate shape)
+            call_ask = r.get("call_gamma_ask")
+            call_bid = r.get("call_gamma_bid")
+            put_ask = r.get("put_gamma_ask")
+            put_bid = r.get("put_gamma_bid")
+            if any(v is not None for v in (call_ask, call_bid, put_ask, put_bid)):
+                gamma = sum(float(v or 0) for v in (call_ask, call_bid, put_ask, put_bid))
+            else:
+                # 3. Single-field aggregate fallback
+                gamma = None
+                for k in ("gamma_dollars", "net_gamma", "gex", "gamma"):
+                    if r.get(k) is not None:
+                        gamma = float(r[k])
+                        break
+                if gamma is None:
+                    # 4. Generic call/put split fallback (greek-exposure shape)
+                    call_g = r.get("call_gamma")
+                    put_g = r.get("put_gamma")
+                    if call_g is not None or put_g is not None:
+                        gamma = float(call_g or 0) - float(put_g or 0)
         if gamma is None:
             continue
         out.append({"strike": strike, "gamma": gamma, "raw": r})
@@ -2277,7 +2303,7 @@ from src.synth import _call_gemini
 @pytest.mark.live
 def test_uw_endpoints_respond_with_expected_shape():
     """All five UW endpoints respond and the parsed shape matches the contract."""
-    gex = uw_client.fetch_greek_exposure_strike("SPY")
+    gex = uw_client.fetch_spot_exposures_strike("SPY")
     flow = uw_client.fetch_flow_alerts("SPY", limit=50)
     vol = uw_client.fetch_volatility("SPY")
     mp = uw_client.fetch_max_pain("SPY")
@@ -2546,7 +2572,7 @@ def fetch_one(ticker: str) -> TickerData:
     """Fetch all five UW endpoints for one ticker. Errors are captured, not raised."""
     try:
         vol = uw_client.fetch_volatility(ticker)
-        gex = uw_client.fetch_greek_exposure_strike(ticker)
+        gex = uw_client.fetch_spot_exposures_strike(ticker)
         flow = uw_client.fetch_flow_alerts(ticker, limit=50)
         oi = uw_client.fetch_oi_strike(ticker)
         mp = uw_client.fetch_max_pain(ticker)

@@ -31,6 +31,13 @@ Read at session start. Never contradict a logged decision without flagging it fi
 **Rejected:** API Advanced ($375/mo, 90-day lookback) — would relax the 30-day data window but isn't justified for a Sunday demo. Startup tier ($625/mo) — would unlock commercial use + redistribution but the operator's framing is personal portfolio + decision-support.
 **Knock-on:** CLAUDE.md updated. README license disclaimer still correct as written.
 
+## 2026-05-24 — GEX endpoint: spot-exposures/strike (NOT greek-exposure/strike)
+
+**Decided:** Use `/api/stock/{ticker}/spot-exposures/strike` for net dealer gamma per strike. Parser computes `call_gamma_oi - put_gamma_oi` per row.
+**Why:** UW's marketing example for "Gamma Exposure (GEX)" uses `spot-exposures/strike`, not `greek-exposure/strike`. The OpenAPI description confirms: spot-exposures is **dealer-positioning** gamma per strike — exactly the "GEX in trader speak" that our pinning + gamma-squeeze detectors model. Per UW's own framing: "Positive gamma → volatility suppressed (pinning), negative gamma → volatility amplified (squeeze)." That's the precise thesis the dashboard surfaces.
+**Rejected:** `/api/stock/{ticker}/greek-exposure/strike` — returns per-contract Greeks (gamma + delta + charm + vanna) which would require additional aggregation to get to dealer positioning. spot-exposures gives us the dealer-positioning view directly.
+**Knock-on:** Plan, uw_client, probe, fixture-recorder, conftest all updated to use the new path. Fixture filename: `uw_spot_exposures_strike_SPY.json` (the fixture-loader name stays `gex_strike_spy` since GEX is the conventional shorthand).
+
 ## 2026-05-23 — UW endpoint paths corrected via OpenAPI spec
 
 **Decided:** Use these UW endpoints (verified in the OpenAPI YAML):
