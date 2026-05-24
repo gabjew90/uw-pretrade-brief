@@ -1,0 +1,67 @@
+# Secrets — never commit
+.streamlit/secrets.toml
+.env
+.env.*
+!.env.example
+
+# Local Claude Code settings (personal allow rules, etc.)
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# uv
+.uv/
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+*.egg
+wheels/
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Type checkers / linters
+.mypy_cache/
+.ruff_cache/
+.pyre/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Tooling caches
+.firecrawl/
+
+# Scratch
+reddit-post.json
+/tmp/
+scratch/
