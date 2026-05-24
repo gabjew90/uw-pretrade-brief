@@ -34,7 +34,7 @@ _Intentionally omitted for now. Do not prompt me to fill this in — I'll add it
 - **Stack context / constraints:**
   - Ship by Sunday night, 2026-05-24.
   - Budget: ~$150 for one month of UW API Basic, plus existing API spend.
-  - UW Basic tier: 30-day data lookback, no WebSocket, personal-use-only license.
+  - UW Basic tier: 30-day data lookback, personal-use-only license, 120 req/min, 40k req/day.
   - Python + Streamlit on Streamlit Cloud; UW API + Google Gemini (`gemini-3.1-flash-lite`) for synthesis.
   - ~16–20 hours of focused build time across the weekend.
   - Decision-support framing only — never trade signals or predictions.
@@ -117,7 +117,7 @@ Apply these to every session without exception. If any task conflicts with one o
 
 - **Operator works from a phone — no local file access.** I cannot open, diff, or run files locally. After every file create/edit, paste the full content (or the diff for small edits) back into chat so I can read it. For anything that won't render in chat — screenshots, generated images, PDFs, long binary output — upload to **litterbox.catbox.moe** (72h) and give me the URL. Never assume I can "just open the file."
 - **License framing:** UW API Basic tier is personal-use-only. No public endpoints that re-serve UW data to other users. Demo is decision-support for the operator only.
-- **Data window:** 30-day lookback maximum. No WebSocket / no real-time streaming.
+- **Data window:** 30-day lookback maximum (UW Basic tier cap). REST polling only — WebSocket streaming is included in the tier but intentionally NOT used in v0.1 to keep state model simple (decision-support framing doesn't need sub-minute updates).
 - **Differentiation rule:** Every analytical view must lean on UW's differentiated, cross-joinable endpoints (dealer positioning, flow, gamma, volatility surface, key strikes). Do not substitute commodity data (OHLC, basic news headlines) as the centerpiece of a view.
 - **No predictions:** Never produce trade signals, conviction scores, directional calls, or backtested edge claims. Framing is always "structurally favored / unfavored / mixed" with the underlying UW evidence shown.
 - **No browser automation:** No Playwright, Selenium, Puppeteer, scraping, or screenshotting infrastructure.

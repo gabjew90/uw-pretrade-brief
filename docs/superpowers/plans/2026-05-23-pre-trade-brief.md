@@ -365,9 +365,11 @@ Write to `src/uw_client.py`:
 ```python
 """Thin REST wrapper for Unusual Whales (Basic tier).
 
-Endpoint paths are first-attempts derived from UW's public API patterns;
-verify with `scripts/probe_uw.py` and adjust if needed. All methods raise
+Endpoint paths verified against the OpenAPI spec at
+https://api.unusualwhales.com/api/openapi (2026-05-23). All methods raise
 UWError on non-2xx so per-ticker callers can isolate failures.
+
+Tier (Basic): 120 req/min, 40k req/day, 30-day lookback, personal-use-only.
 """
 from __future__ import annotations
 import os
@@ -413,14 +415,22 @@ def _get(path: str, params: dict | None = None) -> Any:
     return r.json()
 
 
-def fetch_gex_strike(ticker: str) -> dict:
-    """Per-strike net dealer gamma exposure for the ticker."""
-    return _get(f"/api/stock/{ticker}/gex-strike")
+def fetch_greek_exposure_strike(ticker: str) -> dict:
+    """Per-strike Greek exposure (gamma + delta + charm + vanna) for the ticker."""
+    return _get(f"/api/stock/{ticker}/greek-exposure/strike")
 
 
-def fetch_flow_recent(ticker: str) -> dict:
-    """Recent flow records for the ticker."""
-    return _get(f"/api/stock/{ticker}/flow-recent")
+def fetch_flow_alerts(ticker: str | None = None, limit: int = 50) -> dict:
+    """Recent flow alerts. If ticker is provided, filtered to that ticker;
+    otherwise returns cross-ticker (used for 'hot today' discovery).
+
+    NOTE: the per-ticker `/api/stock/{ticker}/flow-alerts` endpoint is
+    deprecated by UW; both per-ticker and cross-ticker uses go through
+    this single endpoint, parameterized."""
+    params: dict = {"limit": limit}
+    if ticker:
+        params["ticker_symbol"] = ticker
+    return _get("/api/option-trades/flow-alerts", params=params)
 
 
 def fetch_volatility(ticker: str) -> dict:
@@ -431,11 +441,6 @@ def fetch_volatility(ticker: str) -> dict:
 def fetch_max_pain(ticker: str) -> dict:
     """Max pain / key strikes for the ticker."""
     return _get(f"/api/stock/{ticker}/max-pain")
-
-
-def fetch_hot_today(limit: int = 15) -> dict:
-    """Top unusual-flow tickers right now."""
-    return _get("/api/option-trades/flow-alerts", params={"limit": limit})
 ```
 
 - [ ] **Step 2: Smoke-import the module**
@@ -471,11 +476,11 @@ from src import uw_client
 TICKER = sys.argv[1] if len(sys.argv) > 1 else "SPY"
 
 PROBES = [
-    ("gex_strike",        lambda: uw_client.fetch_gex_strike(TICKER)),
-    ("flow_recent",       lambda: uw_client.fetch_flow_recent(TICKER)),
-    ("volatility",        lambda: uw_client.fetch_volatility(TICKER)),
-    ("max_pain",          lambda: uw_client.fetch_max_pain(TICKER)),
-    ("hot_today",         lambda: uw_client.fetch_hot_today(limit=15)),
+    ("greek_exposure_strike", lambda: uw_client.fetch_greek_exposure_strike(TICKER)),
+    ("flow_alerts_ticker",    lambda: uw_client.fetch_flow_alerts(TICKER, limit=50)),
+    ("volatility",            lambda: uw_client.fetch_volatility(TICKER)),
+    ("max_pain",              lambda: uw_client.fetch_max_pain(TICKER)),
+    ("flow_alerts_hot",       lambda: uw_client.fetch_flow_alerts(ticker=None, limit=15)),
 ]
 
 for name, fn in PROBES:
@@ -546,11 +551,11 @@ OUT.mkdir(parents=True, exist_ok=True)
 
 # (label, callable, depends_on_ticker)
 JOBS = [
-    ("gex_strike",  uw_client.fetch_gex_strike, True),
-    ("flow_recent", uw_client.fetch_flow_recent, True),
-    ("volatility",  uw_client.fetch_volatility, True),
-    ("max_pain",    uw_client.fetch_max_pain, True),
-    ("hot_today",   lambda _t=None: uw_client.fetch_hot_today(15), False),
+    ("greek_exposure_strike", uw_client.fetch_greek_exposure_strike, True),
+    ("flow_alerts",           lambda t: uw_client.fetch_flow_alerts(t, limit=50), True),
+    ("volatility",            uw_client.fetch_volatility, True),
+    ("max_pain",              uw_client.fetch_max_pain, True),
+    ("hot_today",             lambda _t=None: uw_client.fetch_flow_alerts(ticker=None, limit=15), False),
 ]
 
 for ticker in TICKERS:
@@ -608,12 +613,14 @@ def _load(name: str):
 
 @pytest.fixture
 def gex_strike_spy():
-    return _load("uw_gex_strike_SPY.json")
+    """Per-strike Greek exposure for SPY (from /api/stock/SPY/greek-exposure/strike)."""
+    return _load("uw_greek_exposure_strike_SPY.json")
 
 
 @pytest.fixture
 def flow_recent_spy():
-    return _load("uw_flow_recent_SPY.json")
+    """Recent flow alerts for SPY (from /api/option-trades/flow-alerts?ticker_symbol=SPY)."""
+    return _load("uw_flow_alerts_SPY.json")
 
 
 @pytest.fixture
@@ -743,17 +750,29 @@ def _unwrap(payload):
 
 
 def gex_records(payload) -> list[dict]:
-    """Return list of {strike: float, gamma: float, ...} dicts."""
+    """Return list of {strike: float, gamma: float, ...} dicts.
+
+    UW's /greek-exposure/strike returns per-strike Greeks. Net gamma may be:
+      - a single field like 'gamma' / 'net_gamma' / 'gex' / 'gamma_dollars', OR
+      - split into 'call_gamma' / 'put_gamma' (typically gamma_call − gamma_put)
+    We try the single-field names first; if none match, we compute call − put.
+    """
     rows = _unwrap(payload)
     out = []
     for r in rows:
         strike = float(r.get("strike") or r.get("strike_price"))
-        # Try common gamma field names; first non-None wins.
         gamma = None
+        # 1. Single-field shape
         for k in ("gamma_dollars", "net_gamma", "gex", "gamma"):
             if r.get(k) is not None:
                 gamma = float(r[k])
                 break
+        # 2. Split call/put shape — common in UW Greek-exposure endpoints
+        if gamma is None:
+            call_g = r.get("call_gamma") or r.get("gamma_call") or r.get("call_gex")
+            put_g = r.get("put_gamma") or r.get("gamma_put") or r.get("put_gex")
+            if call_g is not None or put_g is not None:
+                gamma = float(call_g or 0) - float(put_g or 0)
         if gamma is None:
             continue
         out.append({"strike": strike, "gamma": gamma, "raw": r})
@@ -2258,11 +2277,11 @@ from src.synth import _call_gemini
 @pytest.mark.live
 def test_uw_endpoints_respond_with_expected_shape():
     """All five UW endpoints respond and the parsed shape matches the contract."""
-    gex = uw_client.fetch_gex_strike("SPY")
-    flow = uw_client.fetch_flow_recent("SPY")
+    gex = uw_client.fetch_greek_exposure_strike("SPY")
+    flow = uw_client.fetch_flow_alerts("SPY", limit=50)
     vol = uw_client.fetch_volatility("SPY")
     mp = uw_client.fetch_max_pain("SPY")
-    hot = uw_client.fetch_hot_today(15)
+    hot = uw_client.fetch_flow_alerts(ticker=None, limit=15)
 
     assert uw_client.gex_records(gex), "gex_records returned empty list for SPY"
     assert isinstance(uw_client.flow_records(flow), list)
@@ -2527,8 +2546,8 @@ def fetch_one(ticker: str) -> TickerData:
     """Fetch all five UW endpoints for one ticker. Errors are captured, not raised."""
     try:
         vol = uw_client.fetch_volatility(ticker)
-        gex = uw_client.fetch_gex_strike(ticker)
-        flow = uw_client.fetch_flow_recent(ticker)
+        gex = uw_client.fetch_greek_exposure_strike(ticker)
+        flow = uw_client.fetch_flow_alerts(ticker, limit=50)
         oi = uw_client.fetch_oi_strike(ticker)
         mp = uw_client.fetch_max_pain(ticker)
         return TickerData(
@@ -2880,7 +2899,7 @@ Append to `src/fetch.py`:
 @st.cache_data(ttl=UW_TTL_S, show_spinner=False)
 def fetch_hot_tickers(limit: int = 15) -> list[str]:
     try:
-        payload = uw_client.fetch_hot_today(limit)
+        payload = uw_client.fetch_flow_alerts(ticker=None, limit=limit)
         return uw_client.hot_tickers(payload, limit)
     except Exception:
         return []
