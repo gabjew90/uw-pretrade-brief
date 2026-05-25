@@ -29,7 +29,8 @@ _Intentionally omitted for now. Do not prompt me to fill this in — I'll add it
 - **Goal:** Ship a working hosted demo by Sunday night (2026-05-24) that I actually use for my own weekly options trades. Deliverables: public URL, GitHub repo, short writeup explaining how it works.
 - **Audience:**
   - Me, for my own weekly options trading.
-  - Other weekly options traders eventually — not the focus right now.
+  - Other weekly options traders, via self-hosting (open-source, MIT). They bring their own UW API key.
+  - NOT a public hosted service — the live URL is the operator's personal-use demo only; other people use the repo by forking and deploying their own.
 - **Stack context / constraints:**
   - Ship by Sunday night, 2026-05-24.
   - Budget: ~$150 for one month of UW API Basic, plus existing API spend.

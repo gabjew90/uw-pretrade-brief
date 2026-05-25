@@ -2,7 +2,11 @@
 
 A Streamlit dashboard that scans a watchlist of 10–30 tickers and shows which structural options-trade pattern is firing on each right now — using Unusual Whales data on dealer positioning, dark pool prints, flow, and volatility.
 
-**Live demo:** _[fill in Streamlit Cloud URL after deploy]_
+**Open source** — MIT licensed. Each user runs it with their own Unusual Whales API key (see [Self-host](#self-host) below).
+
+**Live demo:** https://uw-pretrade-brief.streamlit.app (operator's personal-use deployment; please don't load-test it)
+
+[![Deploy to Streamlit Cloud](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://share.streamlit.io/deploy?repository=gabjew90%2Fuw-pretrade-brief&branch=main&mainModule=app.py)
 
 ---
 
@@ -47,21 +51,45 @@ The live URL is intended for limited evaluation by the operator and a small audi
 - **Unusual Whales API** (Basic tier — 120 req/min, 40k req/day, 30-day lookback, personal use)
 - **Google Gemini** (`gemini-3.1-flash-lite`) via the new `google-genai` SDK
 
-## Run locally
+## Self-host
+
+This project is open source under the MIT license. You can run your own instance — locally for personal use, or deployed to Streamlit Cloud for share-with-friends use. Either way you need your own UW API key (per UW's terms of service the API is licensed for personal use only; the code does not redistribute UW data, each user authenticates with their own key).
+
+### Run locally
 
 ```bash
-# 1. Install dependencies
+# 1. Clone
+git clone https://github.com/gabjew90/uw-pretrade-brief.git
+cd uw-pretrade-brief
+
+# 2. Install dependencies (uv handles Python + venv automatically)
 uv sync
 
-# 2. Configure secrets
+# 3. Configure secrets
 cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-# Edit .streamlit/secrets.toml — paste your UW_API_KEY and GEMINI_API_KEY
+# Edit .streamlit/secrets.toml — paste YOUR UW_API_KEY and GEMINI_API_KEY
 
-# 3. Run
+# 4. Run
 uv run streamlit run app.py
 ```
 
 Open <http://localhost:8501> in a browser.
+
+### Deploy your own to Streamlit Cloud (free tier works)
+
+1. Fork this repo on GitHub.
+2. Go to <https://share.streamlit.io> → **Create app** → connect your fork → main file `app.py`.
+3. **Advanced settings → Secrets** → paste your two keys:
+   ```toml
+   UW_API_KEY = "your-key"
+   GEMINI_API_KEY = "your-key"
+   ```
+4. Deploy. ~2 minute build, then a live URL at `https://<your-app-name>.streamlit.app`.
+
+### Where to get the API keys
+
+- **Unusual Whales**: <https://unusualwhales.com/settings/api-dashboard> (requires a UW API subscription — Basic at $150/mo is sufficient and is what this project is tested against)
+- **Google Gemini** (free): <https://aistudio.google.com/apikey>
 
 ## Testing
 
