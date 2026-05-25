@@ -43,6 +43,22 @@ def hot_today():
     return _load("uw_hot_today.json")
 
 
+@pytest.fixture
+def darkpool_spy():
+    return _load("uw_darkpool_SPY.json")
+
+
+@pytest.fixture
+def earnings_spy():
+    """SPY is an ETF; earnings list is expected empty. Use for empty-case tests."""
+    return _load("uw_earnings_SPY.json")
+
+
+@pytest.fixture
+def interpolated_iv_spy():
+    return _load("uw_interpolated_iv_SPY.json")
+
+
 def pytest_collection_modifyitems(config, items):
     """Skip @pytest.mark.live tests unless `-m live` was passed."""
     selected_marker = config.getoption("-m") or ""

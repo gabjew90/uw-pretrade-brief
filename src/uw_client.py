@@ -48,6 +48,7 @@ def _get(path: str, params: dict | None = None) -> Any:
     headers = {
         "Accept": "application/json",
         "Authorization": f"Bearer {_get_key()}",
+        "UW-CLIENT-API-ID": "100001",  # required per UW skill.md anti-hallucination protocol
     }
     try:
         r = requests.get(url, headers=headers, params=params, timeout=TIMEOUT_S)
@@ -92,6 +93,25 @@ def fetch_volatility(ticker: str) -> dict:
 def fetch_max_pain(ticker: str) -> dict:
     """Max pain across expirations for the ticker."""
     return _get(f"/api/stock/{ticker}/max-pain")
+
+
+def fetch_darkpool(ticker: str, limit: int = 50) -> dict:
+    """Recent dark pool prints for the ticker. Used to corroborate options
+    flow (alignment = stronger conviction signal)."""
+    return _get(f"/api/darkpool/{ticker}", params={"limit": limit})
+
+
+def fetch_earnings(ticker: str) -> dict:
+    """Earnings history + upcoming date for the ticker. Used as context for
+    vol-regime 'event_driven' detection."""
+    return _get(f"/api/stock/{ticker}/earnings")
+
+
+def fetch_interpolated_iv(ticker: str) -> dict:
+    """Interpolated IV with percentile/rank data. The source for IV rank
+    when it's needed in key_numbers (volatility/term-structure doesn't
+    include IV rank)."""
+    return _get(f"/api/stock/{ticker}/interpolated-iv")
 
 
 # ---------- Shape normalizers ----------
@@ -238,16 +258,104 @@ def extract_spot(*payloads) -> float | None:
     return None
 
 
-def extract_iv_rank(volatility_payload) -> float | None:
-    """IV rank isn't in UW's /volatility/term-structure response (it's in
-    /volatility/stats which we don't fetch in v0.1). Returns None — synthesis
-    treats IV rank as an optional key_number."""
+def extract_iv_rank(volatility_payload, interpolated_iv_payload=None) -> float | None:
+    """IV rank (0-100 scale). Prefers /interpolated-iv (has 'percentile' per
+    DTE row); picks the front-week row (smallest 'days'). Falls back to root
+    fields on the volatility payload."""
+    if interpolated_iv_payload is not None:
+        rows = _unwrap(interpolated_iv_payload)
+        if isinstance(rows, list) and rows:
+            try:
+                front = min(rows, key=lambda r: r.get("days", 999))
+                pct = front.get("percentile") or front.get("iv_rank") or front.get("rank")
+                if pct is not None:
+                    v = float(pct)
+                    return v * 100 if v <= 1.0 else v
+            except (ValueError, TypeError):
+                pass
     p = _unwrap(volatility_payload)
     if isinstance(p, dict):
         for k in ("iv_rank", "ivr", "iv_percentile"):
             if p.get(k) is not None:
                 v = float(p[k])
                 return v * 100 if v <= 1.0 else v
+    return None
+
+
+def darkpool_records(payload) -> list[dict]:
+    """Return list of {ts, price, size, premium, side, raw} from dark pool payload.
+
+    Side inferred from price vs NBBO midpoint:
+        price > midpoint → "buy" (lifting offer, buyer-initiated)
+        price < midpoint → "sell" (hitting bid, seller-initiated)
+        otherwise        → "neutral"
+    Standard tick-rule classification.
+    """
+    rows = _unwrap(payload)
+    out = []
+    for r in rows:
+        try:
+            price = float(r.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        try:
+            bid = float(r.get("nbbo_bid") or 0)
+            ask = float(r.get("nbbo_ask") or 0)
+        except (TypeError, ValueError):
+            bid = ask = 0
+        side = "neutral"
+        if bid > 0 and ask > 0:
+            mid = (bid + ask) / 2
+            if price > mid:
+                side = "buy"
+            elif price < mid:
+                side = "sell"
+        out.append({
+            "ts": r.get("executed_at"),
+            "price": price,
+            "size": int(r.get("size") or 0),
+            "premium": float(r.get("premium") or 0),
+            "side": side,
+            "raw": r,
+        })
+    return out
+
+
+def darkpool_net_premium(records: list[dict]) -> float:
+    """Net dollar premium across dark pool prints: buys minus sells."""
+    net = 0.0
+    for r in records:
+        if r["side"] == "buy":
+            net += r["premium"]
+        elif r["side"] == "sell":
+            net -= r["premium"]
+    return net
+
+
+def next_earnings(payload) -> str | None:
+    """Pull next upcoming earnings ISO date from the earnings payload, or
+    None if there's nothing scheduled (e.g. ETF, or earnings already past)."""
+    import datetime as _dt
+    rows = _unwrap(payload)
+    if not isinstance(rows, list) or not rows:
+        return None
+    today = _dt.date.today()
+    candidates: list[tuple[_dt.date, str]] = []
+    for r in rows:
+        for k in ("expected_date", "report_date", "earnings_date", "date"):
+            d = r.get(k)
+            if not d:
+                continue
+            try:
+                dt = _dt.date.fromisoformat(str(d)[:10])
+                if dt >= today:
+                    candidates.append((dt, str(d)))
+            except ValueError:
+                pass
+            break
+    if candidates:
+        candidates.sort()
+        return candidates[0][1]
     return None
 
 

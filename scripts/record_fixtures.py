@@ -20,6 +20,9 @@ JOBS = [
     ("flow_alerts",           lambda t: uw_client.fetch_flow_alerts(t, limit=50), True),
     ("volatility",            uw_client.fetch_volatility, True),
     ("max_pain",              uw_client.fetch_max_pain, True),
+    ("darkpool",              lambda t: uw_client.fetch_darkpool(t, limit=50), True),
+    ("earnings",              uw_client.fetch_earnings, True),
+    ("interpolated_iv",       uw_client.fetch_interpolated_iv, True),
     ("hot_today",             lambda _t=None: uw_client.fetch_flow_alerts(ticker=None, limit=15), False),
 ]
 

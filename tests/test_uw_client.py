@@ -16,6 +16,9 @@ from src.uw_client import (
     extract_spot,
     extract_iv_rank,
     max_pain_value,
+    darkpool_records,
+    darkpool_net_premium,
+    next_earnings,
 )
 
 
@@ -135,13 +138,70 @@ def test_extract_iv_rank_returns_none_when_absent(volatility_spy):
     assert extract_iv_rank(volatility_spy) is None
 
 
+def test_extract_iv_rank_uses_interpolated_iv_when_provided(volatility_spy, interpolated_iv_spy):
+    # /interpolated-iv has a 'percentile' field per DTE row; we pick front-week
+    rank = extract_iv_rank(volatility_spy, interpolated_iv_spy)
+    assert rank is not None
+    assert 0 <= rank <= 100  # normalized to 0-100 scale
+
+
+# ---------- New endpoints: dark pool, earnings ----------
+
+def test_darkpool_records_classify_by_nbbo_midpoint(darkpool_spy):
+    records = darkpool_records(darkpool_spy)
+    assert len(records) > 0
+    valid_sides = {"buy", "sell", "neutral"}
+    for r in records:
+        assert r["side"] in valid_sides
+        assert isinstance(r["price"], float) and r["price"] > 0
+        assert isinstance(r["premium"], float)
+        assert isinstance(r["size"], int)
+
+
+def test_darkpool_net_premium_returns_signed_value(darkpool_spy):
+    records = darkpool_records(darkpool_spy)
+    net = darkpool_net_premium(records)
+    assert isinstance(net, float)
+
+
+def test_darkpool_net_premium_synthetic():
+    """Pure unit test on synthetic records."""
+    recs = [
+        {"side": "buy", "premium": 1_000_000, "ts": "", "price": 0, "size": 0, "raw": {}},
+        {"side": "sell", "premium": 300_000, "ts": "", "price": 0, "size": 0, "raw": {}},
+        {"side": "neutral", "premium": 500_000, "ts": "", "price": 0, "size": 0, "raw": {}},
+    ]
+    assert darkpool_net_premium(recs) == 700_000.0
+
+
+def test_next_earnings_returns_none_for_etf(earnings_spy):
+    """SPY is an ETF — earnings list is empty, parser returns None."""
+    assert next_earnings(earnings_spy) is None
+
+
+def test_next_earnings_synthetic_picks_nearest_future():
+    """Synthetic: with multiple dates, pick the nearest future one."""
+    import datetime as _dt
+    future_near = (_dt.date.today() + _dt.timedelta(days=10)).isoformat()
+    future_far = (_dt.date.today() + _dt.timedelta(days=100)).isoformat()
+    past = (_dt.date.today() - _dt.timedelta(days=30)).isoformat()
+    payload = {"data": [
+        {"expected_date": past},
+        {"expected_date": future_far},
+        {"expected_date": future_near},
+    ]}
+    result = next_earnings(payload)
+    assert result == future_near
+
+
 # ---------- Smoke imports ----------
 
 def test_fetch_module_imports():
     """fetch module imports without side effects (proven by other tests)."""
     from src import uw_client
-    assert hasattr(uw_client, "fetch_spot_exposures_strike")
-    assert hasattr(uw_client, "fetch_oi_strike")
-    assert hasattr(uw_client, "fetch_flow_alerts")
-    assert hasattr(uw_client, "fetch_volatility")
-    assert hasattr(uw_client, "fetch_max_pain")
+    for name in (
+        "fetch_spot_exposures_strike", "fetch_oi_strike", "fetch_flow_alerts",
+        "fetch_volatility", "fetch_max_pain",
+        "fetch_darkpool", "fetch_earnings", "fetch_interpolated_iv",
+    ):
+        assert hasattr(uw_client, name), f"missing endpoint method: {name}"
