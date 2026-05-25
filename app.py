@@ -112,6 +112,29 @@ if "pinned_ticker" not in st.session_state:
 with st.spinner(f"Loading {len(tickers)} tickers…"):
     td_map = fetch.fetch_batch(tickers)
 
+# ---------- Halt-on-auth-failure (spec §6) ----------
+# If EVERY ticker failed with a missing-key error, the deployment is
+# misconfigured. Show one big banner and stop — don't render an empty,
+# confusing dashboard.
+def _is_auth_error(err: str | None) -> bool:
+    if not err:
+        return False
+    low = err.lower()
+    return ("api_key not set" in low) or (" 401 " in f" {err} ") or (" 403 " in f" {err} ")
+
+auth_failures = [td for td in td_map.values() if _is_auth_error(td.error)]
+if td_map and len(auth_failures) == len(td_map):
+    st.error(
+        "🔑 **API key not configured for this deployment.** "
+        "Every ticker fetch failed because the Unusual Whales API key is missing "
+        "from Streamlit Cloud secrets. "
+        "If you're the app owner: go to share.streamlit.io → this app's Settings → "
+        "Secrets, paste your `UW_API_KEY` (and `GEMINI_API_KEY`), Save. "
+        "The app will auto-redeploy in ~30 seconds."
+    )
+    st.caption("All other features (scan table, click-to-pin, charts) work as soon as the keys are in place.")
+    st.stop()
+
 # ---------- Build prelim rows (badges + spot for synth payload) ----------
 prelim_rows = []
 for t in tickers:
