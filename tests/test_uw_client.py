@@ -19,6 +19,9 @@ from src.uw_client import (
     darkpool_records,
     darkpool_net_premium,
     next_earnings,
+    parse_option_symbol,
+    contract_records,
+    contracts_near_focus,
 )
 
 
@@ -203,5 +206,82 @@ def test_fetch_module_imports():
         "fetch_spot_exposures_strike", "fetch_oi_strike", "fetch_flow_alerts",
         "fetch_volatility", "fetch_max_pain",
         "fetch_darkpool", "fetch_earnings", "fetch_interpolated_iv",
+        "fetch_option_contracts",
     ):
         assert hasattr(uw_client, name), f"missing endpoint method: {name}"
+
+
+# ---------- Option-contracts parser + contract picker ----------
+
+def test_parse_option_symbol_call():
+    parsed = parse_option_symbol("SPY260522C00748000")
+    assert parsed == {
+        "underlying": "SPY",
+        "expiry": "2026-05-22",
+        "type": "call",
+        "strike": 748.0,
+    }
+
+
+def test_parse_option_symbol_put_fractional_strike():
+    parsed = parse_option_symbol("NVDA260530P00449500")
+    assert parsed["type"] == "put"
+    assert parsed["strike"] == 449.5
+
+
+def test_parse_option_symbol_garbage_returns_none():
+    assert parse_option_symbol("") is None
+    assert parse_option_symbol("not-an-option-symbol") is None
+    assert parse_option_symbol(None) is None
+
+
+def test_contract_records_on_spy_fixture(option_contracts_spy):
+    records = contract_records(option_contracts_spy)
+    assert len(records) > 0
+    sample = records[0]
+    for k in ("symbol", "expiry", "type", "strike", "bid", "ask", "iv", "volume", "oi"):
+        assert k in sample
+    assert sample["type"] in ("call", "put")
+    assert isinstance(sample["strike"], float)
+
+
+def test_contracts_near_focus_filters_to_front_week_strikes():
+    """Synthetic: contracts spanning two expiries; only the nearest-future
+    expiry returned, only ±2 strikes around focus."""
+    import datetime as _dt
+    front = (_dt.date.today() + _dt.timedelta(days=2)).isoformat()
+    far = (_dt.date.today() + _dt.timedelta(days=30)).isoformat()
+    records = []
+    # Front-week 745, 746, 747, 748, 749, 750, 751 (call + put each)
+    for strike in (745.0, 746.0, 747.0, 748.0, 749.0, 750.0, 751.0):
+        for t in ("call", "put"):
+            records.append({"symbol": "X", "expiry": front, "type": t,
+                            "strike": strike, "bid": 1, "ask": 2, "iv": 0.2,
+                            "volume": 100, "oi": 200})
+    # Far expiry — must be excluded
+    records.append({"symbol": "X", "expiry": far, "type": "call",
+                    "strike": 748.0, "bid": 1, "ask": 2, "iv": 0.2,
+                    "volume": 100, "oi": 200})
+
+    near = contracts_near_focus(records, focus_strike=748.0, n_strikes=2)
+    expiries = set(r["expiry"] for r in near)
+    assert expiries == {front}, "far-expiry contract must be filtered out"
+    strikes = sorted(set(r["strike"] for r in near))
+    # ±2 around 748 → 746, 747, 748, 749, 750
+    assert strikes == [746.0, 747.0, 748.0, 749.0, 750.0]
+    # Should have call + put per strike
+    assert len(near) == len(strikes) * 2
+
+
+def test_contracts_near_focus_empty_input():
+    assert contracts_near_focus([], focus_strike=500.0) == []
+
+
+def test_contracts_near_focus_no_future_expiries():
+    """All contracts already expired → empty result."""
+    import datetime as _dt
+    past = (_dt.date.today() - _dt.timedelta(days=30)).isoformat()
+    records = [{"symbol": "X", "expiry": past, "type": "call",
+                "strike": 100.0, "bid": 1, "ask": 2, "iv": 0.2,
+                "volume": 100, "oi": 200}]
+    assert contracts_near_focus(records, focus_strike=100.0) == []

@@ -1,9 +1,10 @@
 """Top pinned ticker card. AI synthesis at the top, three charts stacked
-vertically, key-strikes scalar at the bottom."""
+vertically, contract picker + key strikes at the bottom."""
 from __future__ import annotations
+import pandas as pd
 import streamlit as st
 
-from src import charts, fetch
+from src import charts, fetch, uw_client
 
 
 def _friendly_error_message(ticker: str, raw: str) -> str:
@@ -81,3 +82,53 @@ def render(ticker: str, td: "fetch.TickerData", synthesis: str, patterns: dict):
         charts.vol_term_structure_figure(td.term, ticker=ticker),
         width="stretch",
     )
+
+    _render_contract_picker(ticker, td, patterns)
+
+
+def _render_contract_picker(ticker: str, td: "fetch.TickerData", patterns: dict):
+    """Show front-week option contracts near the structural focus strike.
+
+    Decision-support: lists what's available at the relevant strikes with
+    current bid/ask/IV/volume/OI. Does NOT recommend specific contracts —
+    the user picks. See README's 'What it is NOT' section."""
+    # Pick the focus strike: pinning strike if firing, max-pain if set,
+    # otherwise spot. This is the structural reference point the user
+    # is most likely trading around.
+    focus = None
+    pin = patterns.get("pinning", {})
+    if pin.get("firing"):
+        focus = pin.get("note", {}).get("strike")
+    if focus is None and td.max_pain:
+        focus = td.max_pain
+    if focus is None:
+        focus = td.spot
+    if focus is None:
+        return  # no anchor to filter around
+
+    records = fetch.fetch_one_contracts(ticker)
+    if not records:
+        return
+
+    near = uw_client.contracts_near_focus(records, float(focus), n_strikes=4)
+    if not near:
+        return
+
+    expiry = near[0]["expiry"]
+    st.markdown(f"##### Contracts near {focus:.2f} ({expiry} expiry)")
+    st.caption(
+        "Decision-support only — lists what's available at the relevant strikes. "
+        "Not a recommendation. You decide what to trade."
+    )
+
+    df = pd.DataFrame([{
+        "Strike": r["strike"],
+        "Type": r["type"].upper(),
+        "Bid": r["bid"],
+        "Ask": r["ask"],
+        "Mid": round((r["bid"] + r["ask"]) / 2, 2),
+        "IV": f"{r['iv'] * 100:.1f}%" if r["iv"] else "—",
+        "Volume": r["volume"],
+        "OI": r["oi"],
+    } for r in near])
+    st.dataframe(df, hide_index=True, width="stretch")

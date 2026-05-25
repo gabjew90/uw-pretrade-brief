@@ -114,6 +114,12 @@ def fetch_interpolated_iv(ticker: str) -> dict:
     return _get(f"/api/stock/{ticker}/interpolated-iv")
 
 
+def fetch_option_contracts(ticker: str, limit: int = 500) -> dict:
+    """All option contracts for the ticker. Each row carries bid/ask/IV/
+    volume/OI, with OCC-encoded option_symbol for parsing strike/expiry."""
+    return _get(f"/api/stock/{ticker}/option-contracts", params={"limit": limit})
+
+
 # ---------- Shape normalizers ----------
 
 def _unwrap(payload):
@@ -357,6 +363,90 @@ def next_earnings(payload) -> str | None:
         candidates.sort()
         return candidates[0][1]
     return None
+
+
+# ---------- Option contracts (for the "contract picker" in the pinned card) ----------
+
+import re as _re_options
+_OPTION_SYMBOL_RE = _re_options.compile(
+    r"^(?P<sym>[A-Z]+)(?P<yy>\d{2})(?P<mm>\d{2})(?P<dd>\d{2})(?P<type>[PC])(?P<strike>\d{8})$"
+)
+
+
+def parse_option_symbol(symbol: str) -> dict | None:
+    """Parse an OCC-encoded symbol like 'SPY260522C00748000' into its parts.
+    Returns {underlying, expiry (ISO), type ('call'|'put'), strike (float)} or None."""
+    if not symbol:
+        return None
+    m = _OPTION_SYMBOL_RE.match(symbol)
+    if not m:
+        return None
+    return {
+        "underlying": m["sym"],
+        "expiry": f"20{m['yy']}-{m['mm']}-{m['dd']}",
+        "type": "call" if m["type"] == "C" else "put",
+        "strike": int(m["strike"]) / 1000,
+    }
+
+
+def contract_records(payload) -> list[dict]:
+    """Normalize option-contracts payload into {symbol, expiry, type, strike,
+    bid, ask, iv, volume, oi} dicts."""
+    rows = _unwrap(payload)
+    out = []
+    for r in rows:
+        sym = r.get("option_symbol")
+        parsed = parse_option_symbol(sym) if sym else None
+        if not parsed:
+            continue
+        try:
+            out.append({
+                "symbol": sym,
+                "expiry": parsed["expiry"],
+                "type": parsed["type"],
+                "strike": parsed["strike"],
+                "bid": float(r.get("nbbo_bid") or 0),
+                "ask": float(r.get("nbbo_ask") or 0),
+                "iv": float(r.get("implied_volatility") or 0),
+                "volume": int(r.get("volume") or 0),
+                "oi": int(r.get("open_interest") or 0),
+            })
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def contracts_near_focus(records: list[dict], focus_strike: float,
+                         n_strikes: int = 5) -> list[dict]:
+    """Filter records to the nearest-future expiry, then to the n_strikes
+    immediately above and below `focus_strike` (both calls and puts).
+
+    Returns sorted by (strike, type)."""
+    import datetime as _dt
+    today = _dt.date.today()
+    future: list[tuple[_dt.date, dict]] = []
+    for r in records:
+        try:
+            d = _dt.date.fromisoformat(r["expiry"])
+            if d >= today:
+                future.append((d, r))
+        except (ValueError, KeyError):
+            pass
+    if not future:
+        return []
+    nearest = min(d for d, _ in future)
+    front_week = [r for d, r in future if d == nearest]
+    strikes = sorted(set(r["strike"] for r in front_week))
+    if not strikes:
+        return []
+    closest_idx = min(range(len(strikes)), key=lambda i: abs(strikes[i] - focus_strike))
+    start = max(0, closest_idx - n_strikes)
+    end = min(len(strikes), closest_idx + n_strikes + 1)
+    target = set(strikes[start:end])
+    return sorted(
+        [r for r in front_week if r["strike"] in target],
+        key=lambda r: (r["strike"], r["type"]),
+    )
 
 
 def max_pain_value(payload) -> float | None:

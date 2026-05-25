@@ -23,6 +23,7 @@ JOBS = [
     ("darkpool",              lambda t: uw_client.fetch_darkpool(t, limit=50), True),
     ("earnings",              uw_client.fetch_earnings, True),
     ("interpolated_iv",       uw_client.fetch_interpolated_iv, True),
+    ("option_contracts",      lambda t: uw_client.fetch_option_contracts(t, limit=300), True),
     ("hot_today",             lambda _t=None: uw_client.fetch_flow_alerts(ticker=None, limit=15), False),
 ]
 

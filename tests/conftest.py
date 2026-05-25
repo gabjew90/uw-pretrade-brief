@@ -59,6 +59,11 @@ def interpolated_iv_spy():
     return _load("uw_interpolated_iv_SPY.json")
 
 
+@pytest.fixture
+def option_contracts_spy():
+    return _load("uw_option_contracts_SPY.json")
+
+
 def pytest_collection_modifyitems(config, items):
     """Skip @pytest.mark.live tests unless `-m live` was passed."""
     selected_marker = config.getoption("-m") or ""

@@ -101,6 +101,18 @@ def patterns_for(td: TickerData) -> dict:
 
 
 @st.cache_data(ttl=UW_TTL_S, show_spinner=False)
+def fetch_one_contracts(ticker: str) -> list[dict]:
+    """Lazy: only fetched when a ticker is pinned. ~300 contracts per ticker
+    is bigger than the other endpoints combined, so we don't include this in
+    fetch_one (which runs on every scan-row)."""
+    try:
+        payload = uw_client.fetch_option_contracts(ticker, limit=300)
+        return uw_client.contract_records(payload)
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=UW_TTL_S, show_spinner=False)
 def fetch_hot_tickers(limit: int = 15) -> list[str]:
     """Cross-ticker UW flow-alerts → list of unique hot tickers."""
     try:
