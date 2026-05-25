@@ -120,6 +120,3 @@ See [FUTURE_WORK.md](FUTURE_WORK.md) — intentional scope-deferrals for v0.2+.
 - [MEMORY.md](MEMORY.md) — running decision log (why each architectural call was made + what was rejected)
 - [CLAUDE.md](CLAUDE.md) — project rules + always-true facts
 
----
-
-Built as the portfolio artifact for an Unusual Whales Builder Community Lead application, 2026-05.

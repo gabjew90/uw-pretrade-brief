@@ -26,11 +26,10 @@ _Intentionally omitted for now. Do not prompt me to fill this in — I'll add it
 
 - **Project name:** Weekly Options Pre-Trade Brief
 - **One-line:** A dashboard that takes a ticker and tells you whether a planned weekly options trade is structurally favored, using Unusual Whales data on dealer positioning, volatility, flow, and key strike levels.
-- **Goal:** Ship a working hosted demo by Sunday night (2026-05-24) that I actually use for my own weekly options trades and that serves as the portfolio artifact for the **Unusual Whales Builder Community Lead** application. Deliverables: public URL, GitHub repo, short writeup explaining how it works.
+- **Goal:** Ship a working hosted demo by Sunday night (2026-05-24) that I actually use for my own weekly options trades. Deliverables: public URL, GitHub repo, short writeup explaining how it works.
 - **Audience:**
   - Me, for my own weekly options trading.
-  - The Unusual Whales hiring team, as evidence I can ship on their stack.
-  - Other weekly options traders eventually — not the focus this weekend.
+  - Other weekly options traders eventually — not the focus right now.
 - **Stack context / constraints:**
   - Ship by Sunday night, 2026-05-24.
   - Budget: ~$150 for one month of UW API Basic, plus existing API spend.

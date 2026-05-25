@@ -28,7 +28,7 @@ Read at session start. Never contradict a logged decision without flagging it fi
 
 **Decided:** Operator is on **API Basic** ($150/mo). 120 req/min, 40k req/day, 30-day lookback, personal-use-only. WebSockets included in tier but intentionally unused for v0.1 scope.
 **Why:** Fetched https://unusualwhales.com/pricing?product=api via firecrawl after WebFetch couldn't render the JS table. Settled an open uncertainty: my CLAUDE.md framing of "no WebSocket" looked like a tier-limit but is actually a scope choice — corrected in CLAUDE.md to be honest about what the tier includes vs what we use.
-**Rejected:** API Advanced ($375/mo, 90-day lookback) — would relax the 30-day data window but isn't justified for a Sunday demo. Startup tier ($625/mo) — would unlock commercial use + redistribution but the operator's framing is personal portfolio + decision-support.
+**Rejected:** API Advanced ($375/mo, 90-day lookback) — would relax the 30-day data window but isn't justified for a Sunday demo. Startup tier ($625/mo) — would unlock commercial use + redistribution but the operator's framing is personal-use decision-support.
 **Knock-on:** CLAUDE.md updated. README license disclaimer still correct as written.
 
 ## 2026-05-24 — GEX endpoint: spot-exposures/strike (NOT greek-exposure/strike)

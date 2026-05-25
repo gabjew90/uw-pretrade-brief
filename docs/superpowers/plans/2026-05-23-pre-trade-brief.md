@@ -3236,9 +3236,9 @@ git commit -m "feat(ui): pinned-row indicator + staleness timestamp"
 
 ---
 
-## Phase 8: Deploy + portfolio writeup (~1.5 hr)
+## Phase 8: Deploy + project overview (~1.5 hr)
 
-### Task 8.1: README.md (portfolio writeup)
+### Task 8.1: README.md (project overview)
 
 **Files:**
 - Create: `README.md`
@@ -3346,7 +3346,6 @@ See [FUTURE_WORK.md](FUTURE_WORK.md) — intentional scope-deferrals.
 
 ---
 
-Built by gabjew90 as the portfolio artifact for an Unusual Whales Builder Community Lead application, 2026-05.
 ```
 
 - [ ] **Step 2: Commit**
@@ -3488,14 +3487,14 @@ git commit -m "docs: hero screenshot for README"
 git push
 ```
 
-### Task 8.7: Tag the demo and write the application
+### Task 8.7: Tag the demo
 
 **Files:** none (git tag + external action)
 
 - [ ] **Step 1: Tag the demo**
 
 ```bash
-git tag -a v0.1-demo -m "Sunday demo for UW Builder Community Lead application"
+git tag -a v0.1-demo -m "v0.1 demo — initial working build"
 git push --tags
 ```
 
@@ -3504,9 +3503,9 @@ git push --tags
 Run: `git log --oneline`
 Confirm a clean linear history. Run final test: `uv run pytest`. Confirm green.
 
-- [ ] **Step 3: Operator submits the application**
+- [ ] **Step 3: Update README live URL**
 
-Operator: include the live URL, GitHub repo URL, and a short writeup pointing at the README. Send to UW.
+Once Streamlit Cloud deploy is live, edit `README.md` to replace the placeholder live-URL line with the actual `https://<repo>.streamlit.app` URL. Commit + push.
 
 ---
 
@@ -3522,7 +3521,7 @@ Operator: open the live URL with a real planned weekly options trade in mind. Sc
 
 - [ ] **Step 2: 60-second stranger test**
 
-Operator: show the live URL to one person who doesn't know the project context. Without explanation, ask them what the app does and who it's for. Time them. If they can't articulate it in 60 s, the "What am I looking at" affordance is failing — either revise the subtitle or the "How this works" expander before sending the link to the UW hiring team.
+Operator: show the live URL to one person who doesn't know the project context. Without explanation, ask them what the app does and who it's for. Time them. If they can't articulate it in 60 s, the "What am I looking at" affordance is failing — either revise the subtitle or the "How this works" expander before sharing the link more widely.
 
 - [ ] **Step 3: Log outcome in MEMORY.md**
 
@@ -3555,4 +3554,4 @@ If all tasks check, you have:
 - Per-pattern colored badges with tooltips, non-firing hidden
 - GitHub repo with README + hero screenshot + `v0.1-demo` tag
 - Fixture-based pytest green, opt-in `pytest -m live` green
-- Application submitted to UW Builder Community Lead with all three deliverables (URL, repo, writeup)
+- All three deliverables (live URL, GitHub repo, README writeup) shipped and verified on phone

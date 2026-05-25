@@ -65,7 +65,7 @@ UW_Project/
 │   └── sync_requirements.sh     # uv export → requirements.txt
 ├── docs/superpowers/specs/      # this file lives here
 ├── CLAUDE.md, MEMORY.md
-├── README.md                    # portfolio writeup
+├── README.md                    # project overview
 └── FUTURE_WORK.md               # scope-creep parking lot
 ```
 
@@ -195,7 +195,7 @@ UX-specific decisions, separated from the data-flow layer so they're easy to rev
 
 ### Demo path for the README screenshot
 
-The screenshot in `README.md` is the portfolio's primary visual. Specifying the capture path explicitly so it doesn't end up as "whatever was on screen":
+The screenshot in `README.md` is the project's primary visual. Specifying the capture path explicitly so it doesn't end up as "whatever was on screen":
 
 1. Pick one ticker with all four patterns firing clearly — NVDA on a Friday usually qualifies.
 2. Capture with that ticker pinned, scan table populated below with 8–10 tickers visible.
@@ -321,9 +321,9 @@ Encapsulated in `scripts/sync_requirements.sh`. Optional pre-commit hook to rege
 
 **Python version**: `runtime.txt` at repo root contains `python-3.11`.
 
-**Git workflow**: single `main` branch for Sunday. No PR workflow at this scale. Tag the demo commit `v0.1-demo` so the portfolio link points at a known-good snapshot.
+**Git workflow**: single `main` branch for Sunday. No PR workflow at this scale. Tag the demo commit `v0.1-demo` so the project link points at a known-good snapshot.
 
-**README.md as portfolio writeup** (explicit deliverable for the UW Builder Community Lead application):
+**README.md as project overview** (explicit deliverable for the demo):
 - 1-paragraph what-it-does + live URL at top
 - Screenshot
 - "How it works" — 3–4 bullets on data → patterns → synthesis → UI pipeline
@@ -361,4 +361,4 @@ Encapsulated in `scripts/sync_requirements.sh`. Optional pre-commit hook to rege
 
 **Experiential**:
 - **Real-use test**: operator opens the app on Sunday night for an actual planned weekly options trade. The brief surfaces ≥1 piece of structural information the operator didn't already know going in.
-- **60-second stranger test**: a person who doesn't know the project context opens the live URL and can describe what the app does AND who it's for within 60 seconds, without explanation from the operator. If they can't, the "What am I looking at" affordance has failed and needs revision before sharing the link with the UW hiring team.
+- **60-second stranger test**: a person who doesn't know the project context opens the live URL and can describe what the app does AND who it's for within 60 seconds, without explanation from the operator. If they can't, the "What am I looking at" affordance has failed and needs revision before sharing the link more widely.
