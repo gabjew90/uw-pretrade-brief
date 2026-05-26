@@ -75,15 +75,96 @@ def build_prompt(ticker: str, patterns: dict, key_numbers: dict) -> str:
 
 PINNED_INSTRUCTION = """You are writing an educational walkthrough for an options trader who knows the basics (calls, puts, strikes, IV, DTE) but is NEW to Unusual Whales' specific data framings (Spot GEX, dealer gamma hedging, dark pool tick rule, IV term-structure inversion).
 
-The reader is looking at three charts for {ticker} in the pinned card:
-- Net dealer gamma exposure by strike (the "GEX" chart)
-- Open interest per strike (calls above zero, puts mirrored below)
-- IV term structure (implied vol per days-to-expiry)
+═════════════════════════════════════════════════════════════════════
+UW DATA CONTEXT (read first — every payload field has specific provenance)
+═════════════════════════════════════════════════════════════════════
 
-YOUR JOB: write a structured walkthrough that:
-1. Translates UW-specific concepts as you use them.
-2. Walks through what each chart shows for THIS ticker right now.
-3. Identifies the structural trade(s) the data favors AND names specific contracts (strike + side + expiry) that fit. The reader expects concrete trade ideas, not vague suggestions.
+**Spot GEX → drives pinning + gamma_squeeze patterns**
+- Source: UW `/api/stock/{ticker}/spot-exposures/strike`
+- It's a SNAPSHOT: sum of all currently-open contracts (OI-weighted) as of yesterday's OCC close + today's volume layered on. Updates daily; does NOT change minute-to-minute within a session.
+- Units: dollars per 1% spot move (the $ dealers must hedge if spot moves 1%).
+- Positive γ = dealers LONG gamma (sell into strength, buy into weakness → vol-suppressing, pinning behavior).
+- Negative γ = dealers SHORT gamma (buy into strength, sell into weakness → vol-amplifying, squeeze fuel).
+- "intensity" 0-1 in the payload is computed by OUR pattern detector, not UW:
+    pinning intensity = concentration / 0.50, capped at 1.0; firing requires concentration > 0.30
+    squeeze intensity = side_magnitude / (side_magnitude + other_side); firing requires one side > 1.5× the other AND negative
+  Calibration: intensity 0.5 = moderate, 0.8 = strong, 1.0 = saturated (very strong).
+
+**Dark pool → corroborates the flow pattern**
+- Source: UW `/api/darkpool/{ticker}` — recent off-exchange equity prints (NOT options).
+- Each print classified by tick rule (price vs NBBO midpoint): above mid = buyer-initiated ("buy"), below = seller-initiated ("sell"), equal = "neutral". This is a HEURISTIC, not ground truth on order direction.
+- "dp_alignment" field in the flow note:
+    "aligned" = dark pool net premium has SAME sign as options-flow side, AND |net| > $100k → boosts flow intensity ×1.25
+    "divergent" = opposite signs with |net| > $100k → halves flow intensity
+    "weak_dp" = |net| < $100k → no effect on intensity
+    "n/a" = no dark pool data passed
+
+**Flow → directional options premium**
+- Source: UW `/api/option-trades/flow-alerts?ticker_symbol={ticker}` (50-record window)
+- net_premium_usd = total calls $ − total puts $ in that window. NOT a tick-level feed; aggregated alerts only.
+- Firing requires total premium ≥ $1,000,000 AND skew (|net|/total) ≥ 0.20.
+- Intensity = min(1.0, skew × 2), then adjusted by dark-pool alignment as above.
+
+**Vol regime → IV term-structure inversion**
+- Source: UW `/api/stock/{ticker}/volatility/term-structure` — average ATM call+put IV per expiry.
+- We compare front-week IV (DTE ≤ 7) to 30-day IV. Inversion ≥ 5 vol points → "event_driven" (market pricing a near-term catalyst). Normal term structure slopes UPWARD with DTE; inversion is unusual and meaningful.
+
+**Max pain**
+- Source: UW `/api/stock/{ticker}/max-pain` (per-expiry rows).
+- We pull the FRONT-WEEK only (first row = smallest expiry).
+
+**IV rank (in key_numbers, when present)**
+- Source: UW `/api/stock/{ticker}/interpolated-iv` (front-week percentile, 0-100).
+- 50 = median, >75 = elevated (premium expensive), <25 = crushed (premium cheap).
+
+**next_earnings (in key_numbers, when present)**
+- Source: UW `/api/stock/{ticker}/earnings` (next upcoming date, or null for ETFs / no upcoming).
+
+**Contracts summary (in the payload after key_numbers, when present)**
+- Real live bid/ask/IV from UW's option-contracts endpoint for the strikes nearest the focus point.
+- The user sees these EXACT numbers in the contracts table below your output.
+- When you name a contract, use a strike/expiry from this list — do NOT invent prices or strikes that aren't shown.
+
+═════════════════════════════════════════════════════════════════════
+WHAT YOU DO NOT HAVE (do not invent or imply these)
+═════════════════════════════════════════════════════════════════════
+
+- NO realized volatility data — do not compare IV to "historical realized vol of X" or "20-day HV". You only have implied vol.
+- NO intraday or multi-day trajectory — this is a SNAPSHOT. Do not write "the pin has been holding for 3 days" or "flow has been building over the morning". You see one moment in time.
+- NO tick-level options flow — flow_alerts are pre-aggregated by UW. Do not narrate "in the last 15 minutes I saw...".
+- NO analyst targets, technical levels, news catalysts beyond the `next_earnings` field. Do not say "Fed meeting tomorrow" unless that exact context is in the payload.
+- NO bid/ask for strikes other than those in the Contracts summary block. If you want to name a contract not shown, just say "front-week strike near X" rather than inventing a price.
+- NO data older than 30 days — UW Basic tier cap. Do not reference "quarterly trend" or "year-to-date".
+- NO information about user's account size, risk tolerance, existing positions, or portfolio context. Trade sizing language ("size to 1-2% of account") is fine as generic guidance, but do not assume specifics.
+
+═════════════════════════════════════════════════════════════════════
+GROUNDING RULES (hard requirements)
+═════════════════════════════════════════════════════════════════════
+
+- Every number you cite must come from the payload. If the payload says spot is 745.9 and pin is 745.0, do NOT cite 746.2 or 744.5 — those numbers are not in the data.
+- If you're tempted to add color from market intuition (e.g. "the SPY 745 strike is a key psychological level"), DON'T. Stick to what the payload shows.
+- Distinguish OBSERVATION from INFERENCE. "Spot is 745.9 with pin at 745.0" is observation. "This pin is likely to hold" is inference (allowed when grounded in the firing pattern but say WHY).
+- If a pattern's firing intensity is < 0.5, hedge your conviction language in that section ("moderate concentration" rather than "decisive pin").
+
+═════════════════════════════════════════════════════════════════════
+WHAT THE READER SEES
+═════════════════════════════════════════════════════════════════════
+
+Three charts in the pinned card for {ticker}:
+- Net dealer gamma exposure by strike (the "GEX" chart) — bars across strikes, vertical line at spot
+- Open interest per strike (calls above zero, puts mirrored below) — vertical lines at spot AND max-pain
+- IV term structure (implied vol per days-to-expiry) — line curve, % on y-axis
+
+Plus a contracts table below your output with live bid/ask for the strikes nearest the focus point.
+
+═════════════════════════════════════════════════════════════════════
+YOUR JOB
+═════════════════════════════════════════════════════════════════════
+
+Write a structured walkthrough that:
+1. Translates the UW-specific concepts as you use them (using the calibration above).
+2. Walks through what each chart shows for THIS ticker right now (grounded in the payload).
+3. Identifies the structural trade(s) the data favors AND names specific contracts (strike + side + expiry) that fit, with Entry/Exit conditions.
 
 OUTPUT FORMAT (markdown, 4 sections, each labeled):
 
