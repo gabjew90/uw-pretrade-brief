@@ -243,3 +243,153 @@ def vol_term_structure_figure(series: list[dict], ticker: str) -> go.Figure:
     layout["yaxis"]["tickformat"] = ".0%"
     fig.update_layout(**layout)
     return fig
+
+
+# ---- Percentile dashboard --------------------------------------------------
+# Compact horizontal strip showing where TODAY sits within the trailing
+# history window for each of the 8 percentile-tracked metrics. Same 0–100
+# X-axis for every row so the eye can compare across metrics at a glance.
+
+# Display labels keyed by the metric stem in pct_ctx (without the _pct_7d /
+# _7d_sample_n suffixes). Kept short — these are y-axis tick labels.
+_PERCENTILE_METRIC_LABELS: list[tuple[str, str]] = [
+    ("concentration",         "Pin concentration"),
+    ("squeeze_above",         "Net γ above spot"),
+    ("squeeze_below",         "Net γ below spot"),
+    ("net_premium",           "Net premium"),
+    ("skew",                  "Flow skew"),
+    ("max_pain_distance_pct", "Max-pain distance"),
+    ("front_iv",              "Front-week IV"),
+    ("term_spread_pts",       "Term-structure spread"),
+]
+
+
+def _percentile_dot_color(pct: float) -> str:
+    """Red for extremes (≥90 or ≤10), orange for elevated/quiet quartiles
+    (75-90 or 10-25), blue for the typical interquartile zone (25-75)."""
+    if pct >= 90 or pct <= 10:
+        return COLOR_NEG_GAMMA   # extreme — red
+    if pct >= 75 or pct <= 25:
+        return COLOR_SPOT        # elevated/quiet — orange
+    return COLOR_POS_GAMMA       # typical — blue
+
+
+def percentile_dashboard_figure(pct_ctx: dict, ticker: str) -> go.Figure:
+    """One row per metric. X-axis = 0-100 percentile space (shared across
+    metrics). Today's value plotted as a colored dot at its percentile; gray
+    vertical guides at the 25/50/75 marks; sample size annotated on the right.
+
+    `pct_ctx` is the dict returned by fetch.percentile_context — keys ending
+    in `_pct_7d` (the percentile) and `_7d_sample_n` (the actual sample size).
+    """
+    if not pct_ctx:
+        return _empty(f"{ticker} · percentile dashboard", "No percentile context")
+
+    # Filter to the metrics that have data this session, preserving the
+    # display order above (logical grouping: gamma → flow → vol).
+    rows: list[tuple[str, float, int | None]] = []
+    for key, label in _PERCENTILE_METRIC_LABELS:
+        pct = pct_ctx.get(f"{key}_pct_7d")
+        n = pct_ctx.get(f"{key}_7d_sample_n")
+        if pct is None:
+            continue
+        rows.append((label, float(pct), int(n) if n else None))
+
+    if not rows:
+        return _empty(f"{ticker} · percentile dashboard", "No percentile context")
+
+    labels = [r[0] for r in rows]
+    pcts = [r[1] for r in rows]
+    ns = [r[2] for r in rows]
+    colors = [_percentile_dot_color(p) for p in pcts]
+
+    # Right-side annotation text per metric: percentile + sample size
+    annotations_text = [
+        f"{int(round(p))}th pctile" + (f" · n={n}" if n else "")
+        for p, n in zip(pcts, ns)
+    ]
+
+    fig = go.Figure()
+
+    # Faint horizontal lane lines so each metric row reads as its own track.
+    # Plot first so dots/markers sit on top.
+    for i in range(len(labels)):
+        fig.add_shape(
+            type="line",
+            x0=0, x1=100, y0=i, y1=i,
+            line=dict(color=COLOR_GRID, width=1),
+            layer="below",
+        )
+
+    # Today's dots, colored by zone (red extremes, orange quartiles, blue typical)
+    fig.add_trace(go.Scatter(
+        x=pcts,
+        y=labels,
+        mode="markers",
+        marker=dict(
+            size=14,
+            color=colors,
+            line=dict(color=COLOR_BG, width=2),
+            symbol="circle",
+        ),
+        hovertemplate="<b>%{y}</b><br>today = %{x:.0f}th percentile<extra></extra>",
+        showlegend=False,
+    ))
+
+    # Right-side text annotations for each row
+    n_rows = len(labels)
+    for i, (label, text) in enumerate(zip(labels, annotations_text)):
+        fig.add_annotation(
+            x=105, y=label,
+            text=text,
+            showarrow=False,
+            xanchor="left",
+            font=dict(color=COLOR_AXIS, size=10, family="ui-monospace, SFMono-Regular, monospace"),
+        )
+
+    # Sizing: ~26px per row plus chart chrome. Keeps the strip compact even
+    # with 8 metrics; phone-friendly.
+    height = max(180, 26 * n_rows + 80)
+
+    layout = _base_layout(
+        f"{ticker} · percentile dashboard  ·  today's reading vs trailing history",
+        height=height,
+    )
+    layout["margin"] = dict(l=160, r=140, t=44, b=40)
+    layout["xaxis"]["range"] = [-2, 102]
+    layout["xaxis"]["tickmode"] = "array"
+    layout["xaxis"]["tickvals"] = [0, 25, 50, 75, 100]
+    layout["xaxis"]["ticktext"] = ["0", "25", "50", "75", "100"]
+    layout["xaxis"]["title"] = dict(
+        text="Percentile (0 = lowest in window · 50 = median · 100 = highest)",
+        font=dict(color=COLOR_AXIS, size=10),
+    )
+    layout["yaxis"]["title"]["text"] = ""
+    layout["yaxis"]["autorange"] = "reversed"  # first metric at top
+    layout["yaxis"]["gridcolor"] = COLOR_PAPER  # hide y gridlines; lanes provide structure
+    layout["showlegend"] = False
+    fig.update_layout(**layout)
+
+    # Vertical guide lines at quartile marks — drawn after layout so they pick
+    # up the final y range. Using shapes rather than vlines so we don't get
+    # arrow heads or labels.
+    for x_mark, label_text in [(25, "Q1"), (50, "median"), (75, "Q3")]:
+        fig.add_shape(
+            type="line",
+            x0=x_mark, x1=x_mark,
+            y0=-0.5, y1=n_rows - 0.5,
+            line=dict(
+                color=COLOR_AXIS,
+                width=1,
+                dash="dot" if x_mark != 50 else "dash",
+            ),
+            layer="below",
+        )
+        fig.add_annotation(
+            x=x_mark, y=-0.7,
+            text=label_text,
+            showarrow=False,
+            font=dict(color=COLOR_AXIS, size=9),
+            yshift=2,
+        )
+    return fig

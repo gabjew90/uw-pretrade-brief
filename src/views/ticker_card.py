@@ -131,7 +131,7 @@ def render(ticker: str, td: "fetch.TickerData", synthesis: str, patterns: dict):
                     window = f"{min(ns)} trading days" if min(ns) == max(ns) else f"{min(ns)}-{max(ns)} trading days"
                 else:
                     window = "available history"
-                st.caption(f"📊 Percentile context: {n_metrics} metrics, window = last {window} (UW history depth)")
+                st.caption(f"📊 Percentile context: {n_metrics} metrics, window = last {window} (UW history depth) — see dashboard below")
             else:
                 st.caption("📊 Percentile context: no history available for this ticker")
     with close_col:
@@ -160,6 +160,17 @@ def render(ticker: str, td: "fetch.TickerData", synthesis: str, patterns: dict):
             st.markdown(
                 _escape_dollars_for_markdown(f"**{header}**\n\n{content}")
             )
+
+    # Percentile dashboard — one horizontal strip per metric showing where
+    # today sits within the trailing-history window. Rendered first (above
+    # the three charts) so the reader gets a single at-a-glance answer to
+    # "is today's reading unusual or typical?" before drilling into details.
+    pct_ctx_payload = st.session_state.get(f"_pct_ctx_{ticker}")
+    if pct_ctx_payload and "_error" not in pct_ctx_payload:
+        st.plotly_chart(
+            charts.percentile_dashboard_figure(pct_ctx_payload, ticker=ticker),
+            width="stretch",
+        )
 
     # Gamma chart + walkthrough
     st.plotly_chart(
