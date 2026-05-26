@@ -100,12 +100,20 @@ def patterns_for(td: TickerData) -> dict:
     return {k: v.to_dict() for k, v in bundle.items()}
 
 
-# ---------- 7-day percentile context for the pinned ticker ----------
+# ---------- Rolling percentile context for the pinned ticker ----------
 # Historical snapshots are immutable for past dates — cache them aggressively
 # (24h TTL). Current-day refresh keeps the existing 15-min UW_TTL_S.
+#
+# UW Basic tier's history depth on these endpoints is account-specific (the
+# 403 error: "earliest date currently available to you is YYYY-MM-DD (N trading
+# days)"). Currently observed: ~7 trading days. We request a 30-day window so
+# the resulting sample auto-expands if the subscription is upgraded or as the
+# account ages; the extra 403s are caught + cached as empty payloads, so each
+# only costs one cheap rejected request.
 
 HISTORICAL_TTL_S = 86400   # 24h — past-date snapshots don't change
-HISTORICAL_WINDOW_DAYS = 30  # 30 trading days of history per pinned ticker (UW Basic ceiling)
+HISTORICAL_WINDOW_DAYS = 30  # max trading days requested; actual sample depth
+                             # equals what UW returns (currently ~7 on Basic)
 HISTORICAL_LOOKBACK_CALENDAR = 50  # try last 50 calendar days to find 30 trading
                                    # (accounts for weekends + occasional holidays)
 HISTORICAL_MAX_CONCURRENCY = 3     # threadpool workers for historical fetch — gentler

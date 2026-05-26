@@ -34,7 +34,7 @@ _Intentionally omitted for now. Do not prompt me to fill this in — I'll add it
 - **Stack context / constraints:**
   - Ship by Sunday night, 2026-05-24.
   - Budget: ~$150 for one month of UW API Basic, plus existing API spend.
-  - UW Basic tier: 30-day data lookback, personal-use-only license, 120 req/min, 40k req/day.
+  - UW Basic tier: historical lookback is account-specific (surfaced via 403 `historic_data_access_missing`); currently observed ~7 trading days on spot-exposures, max-pain, volatility, net-prem-ticks endpoints. Personal-use-only license, 120 req/min, 40k req/day.
   - Python + Streamlit on Streamlit Cloud; UW API + Google Gemini (`gemini-3.1-flash-lite`) for synthesis.
   - ~16–20 hours of focused build time across the weekend.
   - Decision-support framing only — never trade signals or predictions.
@@ -117,7 +117,7 @@ Apply these to every session without exception. If any task conflicts with one o
 
 - **Operator works from a phone — no local file access.** I cannot open, diff, or run files locally. After every file create/edit, paste the full content (or the diff for small edits) back into chat so I can read it. For anything that won't render in chat — screenshots, generated images, PDFs, long binary output — upload to **litterbox.catbox.moe** (72h) and give me the URL. Never assume I can "just open the file."
 - **License framing:** UW API Basic tier is personal-use-only. No public endpoints that re-serve UW data to other users. Demo is decision-support for the operator only.
-- **Data window:** 30-day lookback maximum (UW Basic tier cap). REST polling only — WebSocket streaming is included in the tier but intentionally NOT used in v0.1 to keep state model simple (decision-support framing doesn't need sub-minute updates).
+- **Data window:** UW Basic historical lookback on spot-exposures, max-pain, volatility, and net-prem-ticks endpoints is account-specific (returned via 403 `historic_data_access_missing`); currently observed ~7 trading days. The percentile-context code requests 30 dates so the window auto-expands if the subscription is upgraded or as the account ages — extra dates are cached as empty payloads. REST polling only — WebSocket streaming is included in the tier but intentionally NOT used in v0.1 to keep state model simple.
 - **Differentiation rule:** Every analytical view must lean on UW's differentiated, cross-joinable endpoints (dealer positioning, flow, gamma, volatility surface, key strikes). Do not substitute commodity data (OHLC, basic news headlines) as the centerpiece of a view.
 - **No backtested edge claims, no win-rate stats, no past-performance promises.** The pinned-card synthesis MAY name specific trade structures + contracts that fit a firing pattern (operator-approved 2026-05-25). The SCAN-ROW synthesis stays observational only (no prescriptive language). Two-tier rule. (The "NOT INVESTMENT ADVICE" banner that originally accompanied this was removed 2026-05-26 at operator request; the recommendation framing itself was retained.)
 - **No browser automation:** No Playwright, Selenium, Puppeteer, scraping, or screenshotting infrastructure.

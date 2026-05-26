@@ -119,8 +119,8 @@ UW DATA CONTEXT (read first — every payload field has specific provenance)
 **next_earnings (in key_numbers, when present)**
 - Source: UW `/api/stock/{ticker}/earnings` (next upcoming date, or null for ETFs / no upcoming).
 
-**30-day percentile fields (in key_numbers, when present)**
-- Format: `{{metric}}_pct_7d` = today's value's percentile (0-100) within the last ~30 trading days for THIS ticker. Computed by us, not UW. (Field-name suffix is `_pct_7d` for legacy reasons; the actual window is 30 days. Companion `{{metric}}_7d_sample_n` tells you the actual sample size.)
+**Rolling percentile fields (in key_numbers, when present)**
+- Format: `{{metric}}_pct_7d` = today's value's percentile (0-100) within the trailing-history window for THIS ticker. Computed by us, not UW. (Field-name suffix `_pct_7d` is legacy; the actual window depth equals `{{metric}}_7d_sample_n`, which depends on UW history depth available to this subscription — typically ~7 trading days on Basic tier.)
 - Available metrics (all share the same 4-endpoint historical fetch):
     - `concentration_pct_7d` — gamma pin concentration (top |γ| near spot / sum |γ| in band)
     - `squeeze_above_pct_7d` — net dealer γ summed above spot (negative = squeeze fuel up)
@@ -130,15 +130,15 @@ UW DATA CONTEXT (read first — every payload field has specific provenance)
     - `net_premium_pct_7d` — daily cumulative net options premium (calls $ − puts $)
     - `skew_pct_7d` — |net flow| / total flow, 0 = balanced, 1 = 100% one side
     - `max_pain_distance_pct_7d` — (spot − max-pain) / spot × 100; positive = spot above max-pain
-- Companion `{{metric}}_7d_sample_n` (typically 25-30; can be as low as 3 if data is sparse).
-- Calibration (30 samples ~ 3-point precision):
-    - 95+ = today's value is among the HIGHEST in the past month → noteworthy / unusually heightened
-    - 75-95 = elevated for this ticker (top quartile)
+- Companion `{{metric}}_7d_sample_n` is the actual sample size used (typically 5-8 days on Basic tier; can be higher as the subscription ages or lower if data is sparse for that metric).
+- Calibration (with small samples ~5-8 days, percentile is coarse — increments of ~12-20 points):
+    - 90+ = today's value is among the HIGHEST in the trailing window → noteworthy
+    - 75-90 = elevated for this ticker (top quartile)
     - 25-75 = typical / interquartile range
-    - 5-25 = quiet for this ticker (bottom quartile)
-    - <5 = today's value is among the LOWEST in the past month → noteworthy / unusually quiet
-- USE THESE in your interpretation. When citing percentile, prefer phrasing like "today's flow skew is in the 88th percentile of the past month for this ticker" rather than the raw `_pct_7d` field name. If sample_n is low (<10), acknowledge it ("sample is shallow this period").
-- Cite the relevant percentile for EVERY scalar metric you mention. "Concentration 0.337" alone is not enough — pair it with "(98th percentile vs past 30 days)" or similar.
+    - 10-25 = quiet for this ticker (bottom quartile)
+    - <10 = today's value is among the LOWEST in the trailing window → noteworthy
+- USE THESE in your interpretation. When citing percentile, ALWAYS reference the actual sample size by saying "vs the last N trading days for this ticker" (where N = the metric's `_7d_sample_n`), NOT a hardcoded "past 30 days" or "past month". If sample_n is low (≤5), acknowledge it ("sample is shallow — interpret with caution").
+- Cite the relevant percentile for EVERY scalar metric you mention. "Concentration 0.337" alone is not enough — pair it with "(98th percentile vs last 8 trading days)" or similar.
 
 **Contracts summary (in the payload after key_numbers, when present)**
 - Real live bid/ask/IV from UW's option-contracts endpoint for the strikes nearest the focus point.
@@ -154,7 +154,7 @@ WHAT YOU DO NOT HAVE (do not invent or imply these)
 - NO tick-level options flow — flow_alerts are pre-aggregated by UW. Do not narrate "in the last 15 minutes I saw...".
 - NO analyst targets, technical levels, news catalysts beyond the `next_earnings` field. Do not say "Fed meeting tomorrow" unless that exact context is in the payload.
 - NO bid/ask for strikes other than those in the Contracts summary block. If you want to name a contract not shown, just say "front-week strike near X" rather than inventing a price.
-- NO data older than 30 days — UW Basic tier cap. Do not reference "quarterly trend" or "year-to-date".
+- NO data older than the UW history depth available to this subscription (typically ~7 trading days on Basic tier; see `_7d_sample_n` for the exact window). Do not reference "quarterly trend" or "year-to-date".
 - NO information about user's account size, risk tolerance, existing positions, or portfolio context. Trade sizing language ("size to 1-2% of account") is fine as generic guidance, but do not assume specifics.
 
 ═════════════════════════════════════════════════════════════════════
@@ -438,20 +438,22 @@ def validate_pinned_output(text: str, must_contain_numbers: list[float],
 def _pct_line(kn: dict, metric: str, label: str) -> str:
     """Format a one-sentence percentile-context line, or empty string if the
     metric has no recorded history this session. Reads `{metric}_pct_7d` +
-    `{metric}_7d_sample_n` from key_numbers (the suffix is `_7d` for legacy
-    reasons; the window is actually 30 trading days)."""
+    `{metric}_7d_sample_n` from key_numbers (the suffix is `_pct_7d` is
+    legacy; the actual window depth depends on UW history depth available
+    to this subscription, which is surfaced via sample_n)."""
     pct = kn.get(f"{metric}_pct_7d")
     n = kn.get(f"{metric}_7d_sample_n")
     if pct is None:
         return ""
-    n_note = f", n={int(n)}" if n else ""
-    return f" Today's {label} sits in the **{pct:.0f}th percentile** vs the past 30 trading days for this ticker{n_note}."
+    window = f"last {int(n)} trading days" if n else "available history"
+    return f" Today's {label} sits in the **{pct:.0f}th percentile** vs the {window} for this ticker."
 
 
 def fallback_pinned_summary(ticker: str, patterns: dict, key_numbers: dict) -> str:
     """Deterministic fallback for the pinned card when Gemini fails or its
-    output is rejected. Same four-section format, no AI. Includes 30-day
-    percentile context for every metric where history is available."""
+    output is rejected. Same four-section format, no AI. Includes rolling
+    percentile context (window depth = UW history available; ~7 days on
+    Basic tier) for every metric where history is available."""
     p = patterns or {}
     kn = key_numbers or {}
     spot = kn.get("spot")

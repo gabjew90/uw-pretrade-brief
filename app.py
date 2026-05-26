@@ -199,11 +199,14 @@ if pinned:
     }
     pinned_kn = {k: v for k, v in pinned_kn.items() if v is not None}
 
-    # 30-day percentile context for the pinned ticker. Computes today's value
-    # vs the last ~30 trading days for each metric where we have history. Lets
-    # the synth interpret "is this reading typical or unusual for this ticker?"
-    # All 8 metrics share the same 4-endpoint historical fetch (cached) — no
-    # extra UW API cost for adding metrics that derive from already-fetched payloads.
+    # Rolling percentile context for the pinned ticker. Computes today's value
+    # vs the trailing-history window for each metric. Window depth = UW history
+    # available to this subscription (~7 trading days on Basic tier; the request
+    # asks for 30 dates so the window auto-expands if the subscription is upgraded
+    # or as the account ages). Lets the synth interpret "is this reading typical
+    # or unusual for this ticker?" All 8 metrics share the same 4-endpoint
+    # historical fetch (cached) — no extra UW API cost for adding metrics that
+    # derive from already-fetched payloads.
     try:
         pin_note = pinned_patterns.get("pinning", {}).get("note", {})
         sq_note = pinned_patterns.get("gamma_squeeze", {}).get("note", {})
@@ -223,7 +226,7 @@ if pinned:
                 else None
             ),
         }
-        with st.spinner(f"Computing 30-day percentile context for {pinned} "
+        with st.spinner(f"Computing rolling percentile context for {pinned} "
                         f"(first load ~30s; cached after)…"):
             pct_ctx = fetch.percentile_context(pinned, today_metrics)
         pinned_kn.update(pct_ctx)

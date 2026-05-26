@@ -117,21 +117,23 @@ def render(ticker: str, td: "fetch.TickerData", synthesis: str, patterns: dict):
         pct_ctx = st.session_state.get(f"_pct_ctx_{ticker}")
         if pct_ctx is not None:
             if "_error" in pct_ctx:
-                st.caption(f"📊 30-day percentile context: failed ({pct_ctx['_error']})")
+                st.caption(f"📊 Rolling percentile context: failed ({pct_ctx['_error']})")
             elif pct_ctx:
                 # Sample sizes can differ per metric (concentration is computed
                 # only when nearby strikes exist; others fall back to any spot
                 # value). Show min-max range rather than a single number so the
-                # user isn't misled when one metric has thinner history.
+                # user isn't misled when one metric has thinner history. The
+                # window depth is the UW history available to this subscription
+                # (typically ~7 trading days on Basic tier).
                 n_metrics = sum(1 for k in pct_ctx if k.endswith("_pct_7d"))
                 ns = [int(v) for k, v in pct_ctx.items() if k.endswith("_sample_n") and v]
                 if ns:
-                    n_note = f", n={min(ns)}" if min(ns) == max(ns) else f", n={min(ns)}-{max(ns)}"
+                    window = f"{min(ns)} trading days" if min(ns) == max(ns) else f"{min(ns)}-{max(ns)} trading days"
                 else:
-                    n_note = ""
-                st.caption(f"📊 30-day percentile context: {n_metrics} metrics loaded{n_note}")
+                    window = "available history"
+                st.caption(f"📊 Percentile context: {n_metrics} metrics, window = last {window} (UW history depth)")
             else:
-                st.caption("📊 30-day percentile context: no history available (insufficient samples)")
+                st.caption("📊 Percentile context: no history available for this ticker")
     with close_col:
         if st.button("✕", key="unpin", help="Unpin"):
             st.session_state.pinned_ticker = None
