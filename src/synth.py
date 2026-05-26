@@ -17,8 +17,8 @@ import sys
 from typing import Any
 
 MODEL = "gemini-3.1-flash-lite"
-MAX_OUTPUT_TOKENS = 120         # scan-row synthesis (tight)
-MAX_OUTPUT_TOKENS_PINNED = 700  # pinned-card synthesis (multi-paragraph walkthrough + rec)
+MAX_OUTPUT_TOKENS = 120          # scan-row synthesis (tight)
+MAX_OUTPUT_TOKENS_PINNED = 1400  # pinned-card synthesis (multi-paragraph + 3-4 trades w/ Entry/Exit/Why)
 
 # Used by SCAN-ROW synthesis only. The pinned synthesis is allowed to use
 # recommendation language because the user explicitly opted in with the
@@ -145,6 +145,10 @@ GROUNDING RULES (hard requirements)
 - If you're tempted to add color from market intuition (e.g. "the SPY 745 strike is a key psychological level"), DON'T. Stick to what the payload shows.
 - Distinguish OBSERVATION from INFERENCE. "Spot is 745.9 with pin at 745.0" is observation. "This pin is likely to hold" is inference (allowed when grounded in the firing pattern but say WHY).
 - If a pattern's firing intensity is < 0.5, hedge your conviction language in that section ("moderate concentration" rather than "decisive pin").
+- **CRITICAL FORMATTING: do NOT use the `$` character for currency amounts.** Streamlit's markdown renderer treats `$` as LaTeX math-mode delimiter and will mangle your text. Use `USD` or bare numbers instead.
+    - WRONG: `-$8.8M net premium`, `$5,000,000 of flow`, `target $740`
+    - RIGHT: `-8.8M USD net premium`, `5,000,000 USD of flow`, `target 740`
+    - For strike prices (no currency symbol needed anyway): just write `745` or `745.00`.
 
 ═════════════════════════════════════════════════════════════════════
 WHAT THE READER SEES

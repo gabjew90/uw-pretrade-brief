@@ -35,6 +35,16 @@ def render_empty():
     st.info("Tap a row below to see detailed analysis.")
 
 
+def _escape_dollars_for_markdown(text: str) -> str:
+    """Streamlit's markdown renderer treats `$...$` as LaTeX math mode.
+    The synthesis prompt forbids `$` for currency, but escape any that
+    slip through as a defensive backstop so the output never mangles."""
+    # Replace bare $ with the escaped form \$ which renders as a literal $
+    # Only escape $ that aren't already escaped.
+    import re as _re
+    return _re.sub(r'(?<!\\)\$', r'\\$', text)
+
+
 def render(ticker: str, td: "fetch.TickerData", synthesis: str, patterns: dict):
     """Render the pinned card for a ticker.
 
@@ -45,8 +55,11 @@ def render(ticker: str, td: "fetch.TickerData", synthesis: str, patterns: dict):
     with head_col:
         st.markdown(f"### {ticker}")
         # Render the multi-paragraph markdown directly (no italics wrap; the
-        # walkthrough has its own structure with bold section headers)
-        st.markdown(synthesis)
+        # walkthrough has its own structure with bold section headers).
+        # Dollar-escape is defensive — the prompt already tells Gemini to
+        # avoid `$` for currency, but this prevents math-mode renders if
+        # something slips through.
+        st.markdown(_escape_dollars_for_markdown(synthesis))
         # Context strip: spot · IV rank · earnings · max pain
         meta = []
         if td.spot:
