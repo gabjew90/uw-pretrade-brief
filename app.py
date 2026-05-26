@@ -212,15 +212,13 @@ if pinned:
             contracts_summary=contracts_for_prompt,
         )
     except Exception as _pinned_err:
-        # Temporary diagnostic exposure — Streamlit Cloud redacts exceptions in
-        # production by default. Surfacing the real cause here so we can fix it.
-        import traceback as _tb
-        st.warning(
-            f"**Pinned synth error (diagnostic):** `{type(_pinned_err).__name__}: {_pinned_err}`"
-        )
-        with st.expander("Full traceback"):
-            st.code(_tb.format_exc())
+        # Defensive: if the synth call itself blows up (cache hash issue, Gemini
+        # SDK regression, etc.), fall back to the deterministic template rather
+        # than crashing the whole page. Log to stderr for Cloud-side debugging.
+        import sys as _sys
         from src.synth import fallback_pinned_summary as _fb
+        print(f"[synth-pinned] {pinned} outer-fallback ({type(_pinned_err).__name__}: {_pinned_err})",
+              file=_sys.stderr)
         pinned_synth = _fb(pinned, pinned_patterns, pinned_kn)
     ticker_card.render(pinned, pinned_td, pinned_synth, pinned_patterns)
 else:
