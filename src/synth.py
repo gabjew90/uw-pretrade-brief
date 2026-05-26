@@ -101,17 +101,26 @@ OUTPUT FORMAT (markdown, 4 sections, each labeled):
 - 1-2 sentences. Front-week IV vs 30-day IV. If inverted (≥5 vol points), explain it means the market is pricing an event-driven near-term catalyst (earnings, FOMC, scheduled news). If normal, say so plainly.
 
 **Best contracts for the week**
-- 2-4 specific trade ideas. Each must include:
-  - Trade structure (e.g., "ATM straddle", "30-delta call vertical", "short iron condor centered on 450")
-  - Specific strikes + side(s) + DTE
-  - One-sentence justification tied to the firing patterns above
+- 2-4 specific trade ideas, each formatted as a bullet with **bold name + structure** followed by THREE sub-bullets in this exact order:
+  - **Entry**: when to put it on. Be specific — "at the open", "wait for SPY to break below 745", "on a reversal candle off 745 with rising volume", "only if IV rank holds above 80", etc. Reference price levels, time-of-day, or confirming signals. NEVER say "any time" or leave it vague.
+  - **Exit**: target AND stop. Target = profit-taking condition (e.g., "50% of max profit", "spot reaches max-pain 737"). Stop = thesis-break condition (e.g., "close if SPY reclaims 746.5 with volume", "exit if dark pool flips long > $5M"). If the trade is meant to ride to expiry, say "let expire worthless if pin holds" instead of a target.
+  - **Why**: ONE sentence tying the entry/exit to the firing patterns above.
+- The Entry/Exit framework is critical — a trader needs to know WHEN to act, not just WHAT to trade. A vague "captures the move" is not enough.
 - Order: most structurally-aligned trade first, alternative directional play second, lower-conviction or hedged-alternative third.
-- If no patterns are firing strongly enough, say so: "No high-conviction structural setup this week — consider sitting out or waiting for a fresh catalyst." Don't manufacture a trade.
+- If no patterns are firing strongly enough, say so plainly: "No high-conviction structural setup this week — wait for a fresh catalyst or sit out." Don't manufacture trades.
+
+EXAMPLE of the Entry/Exit format (shape only — your actual content will differ):
+
+- **Bearish Directional Play** — 745.00 put (front-week)
+  - **Entry**: enter at the open if SPY trades below 745.0; wait for a break otherwise.
+  - **Exit**: target 740.0 (halfway to max-pain 737); stop out if SPY reclaims 746.5 with volume.
+  - **Why**: -$8.8M net flow + aligned dark pool suggests the pin breaks down once dealer hedging exhausts.
 
 STRICT REQUIREMENTS:
 - Cite at least 4 specific numbers from the payload (spot, max-pain, pin strike, flow $, IV, DTE, etc.).
 - Stay grounded in the actual data shown — do not invent numbers.
 - When naming a contract, use the format: "STRIKE call/put expiring YYYY-MM-DD" or just "STRIKE call/put (front-week)".
+- Each trade idea MUST have the three sub-bullets (Entry / Exit / Why). Output is rejected if Entry/Exit markers are missing.
 - The user sees a contract picker table below your output showing real bid/ask for the strikes you mention. Be consistent with what they'll see in that table.
 
 Do not hedge with "this is not financial advice" or "consult a professional" — the dashboard has a prominent disclaimer at the top of the page covering that. Just write the analysis.
@@ -152,7 +161,7 @@ def validate_output(text: str, must_contain_numbers: list[float]) -> tuple[bool,
         return False, f"prescriptive language: {m.group(0)}"
     if must_contain_numbers:
         text_nums = set()
-        for tok in re.finditer(r"-?\d[\d,\.]*", text):
+        for tok in re.finditer(r"-?\d[\d,]*(?:\.\d+)?", text):
             try:
                 text_nums.add(float(tok.group(0).replace(",", "")))
             except ValueError:
@@ -241,7 +250,7 @@ def _substance_beats_fallback(synthesis: str, fallback: str) -> bool:
     as many distinct numeric tokens as the fallback. Else prefer fallback."""
     def _nums(s: str) -> set:
         out = set()
-        for m in re.finditer(r"-?\d[\d,\.]*", s or ""):
+        for m in re.finditer(r"-?\d[\d,]*(?:\.\d+)?", s or ""):
             try:
                 out.add(float(m.group(0).replace(",", "")))
             except ValueError:
@@ -259,8 +268,8 @@ def _substance_beats_fallback(synthesis: str, fallback: str) -> bool:
 def validate_pinned_output(text: str, must_contain_numbers: list[float],
                            min_numbers_cited: int = 4) -> tuple[bool, str]:
     """Pinned-card validator. NO prescriptive-language blocklist (the disclaimer
-    covers that). Requires substantive numeric grounding and the four section
-    headers from the prompt.
+    covers that). Requires substantive numeric grounding, the four section
+    headers, AND Entry/Exit markers in the trade-ideas section.
 
     Returns (ok, reason_if_not_ok)."""
     if not text or not text.strip():
@@ -275,9 +284,20 @@ def validate_pinned_output(text: str, must_contain_numbers: list[float],
     missing = [h for h in required_headers if h not in text]
     if missing:
         return False, f"missing required section(s): {missing}"
+    # Trade ideas must have actionable Entry/Exit framework, not just narrative.
+    # Allow a clean "no setup" output to skip (it explicitly says no trade).
+    contracts_section = text.split("Best contracts for the week", 1)[1] if "Best contracts for the week" in text else ""
+    no_trade_signal = ("no high-conviction" in contracts_section.lower()
+                       or "sit out" in contracts_section.lower()
+                       or "no trade" in contracts_section.lower())
+    if not no_trade_signal:
+        if "Entry" not in contracts_section:
+            return False, "trade ideas missing Entry/Exit framework (no 'Entry' marker found)"
+        if "Exit" not in contracts_section:
+            return False, "trade ideas missing Entry/Exit framework (no 'Exit' marker found)"
     # Count distinct numeric tokens in the output
     text_nums = set()
-    for tok in re.finditer(r"-?\d[\d,\.]*", text):
+    for tok in re.finditer(r"-?\d[\d,]*(?:\.\d+)?", text):
         try:
             text_nums.add(float(tok.group(0).replace(",", "")))
         except ValueError:
@@ -341,27 +361,63 @@ def fallback_pinned_summary(ticker: str, patterns: dict, key_numbers: dict) -> s
     else:
         vol_msg = f"Vol term structure is normal. IV rank {iv_rank if iv_rank else '?'}."
 
-    # Trade ideas section — straight from the firing patterns
+    # Trade ideas section — straight from the firing patterns, with Entry/Exit
+    # framework so the trader knows WHEN to act, not just WHAT to trade.
     ideas = []
     if pin.get("firing"):
         strike = pin["note"].get("strike", "?")
-        ideas.append(f"- **Short straddle or iron condor centered on {strike}** (front-week expiry). The pin favors range-bound premium-selling structures.")
+        ideas.append(
+            f"- **Pinning Play (premium-selling)** — iron butterfly or short straddle centered on **{strike}** (front-week).\n"
+            f"  - **Entry**: at the open if spot is within ${1.0:.0f} of {strike}; wait if spot is drifting away.\n"
+            f"  - **Exit**: target 50% of max credit by Thursday; let expire worthless Friday if pin holds. Stop out if spot breaks ±1.5% from {strike} on momentum.\n"
+            f"  - **Why**: dealer gamma concentration at {strike} tends to pull price back; premium-selling structures harvest the resulting time-decay."
+        )
     if sq.get("firing"):
         direction = sq["note"].get("direction", "?")
         if direction == "up":
-            ideas.append(f"- **OTM call** at the first squeeze trigger above spot ({spot_str}). The structure amplifies if price crosses.")
+            ideas.append(
+                f"- **Squeeze-Up Play** — OTM call above spot {spot_str} (front-week).\n"
+                f"  - **Entry**: enter on a break above {spot_str} with volume confirmation; do NOT enter pre-break.\n"
+                f"  - **Exit**: target +50% on the contract or trail a stop at the trigger level. Stop out if spot reverses back below the trigger.\n"
+                f"  - **Why**: dealers are short gamma above spot; if price crosses, their hedging amplifies the move."
+            )
         else:
-            ideas.append(f"- **OTM put** below spot ({spot_str}). Squeeze-down setup amplifies on a break lower.")
+            ideas.append(
+                f"- **Squeeze-Down Play** — OTM put below spot {spot_str} (front-week).\n"
+                f"  - **Entry**: enter on a break below {spot_str} with volume confirmation; do NOT pre-position.\n"
+                f"  - **Exit**: target +50% on the contract or trail. Stop out if spot reclaims the trigger.\n"
+                f"  - **Why**: dealers short gamma below spot — chase selling on a break amplifies the move down."
+            )
     if flow.get("firing"):
         side = flow["note"].get("side", "?")
         if side == "long":
-            ideas.append(f"- **Bullish vertical (call debit spread)** to ride the flow direction with defined risk.")
+            ideas.append(
+                f"- **Bullish Vertical** — call debit spread, front-week, ATM/+1 strike width.\n"
+                f"  - **Entry**: at the open or on a minor pullback to a recent support; size to 1-2% of account.\n"
+                f"  - **Exit**: target 50% of max value; stop out if flow flips short or dark pool turns divergent.\n"
+                f"  - **Why**: net long options premium + dark-pool alignment suggests directional consensus — defined-risk vertical caps downside."
+            )
         elif side == "short":
-            ideas.append(f"- **Bearish vertical (put debit spread)** to ride the flow direction with defined risk.")
+            ideas.append(
+                f"- **Bearish Vertical** — put debit spread, front-week, ATM/-1 strike width.\n"
+                f"  - **Entry**: at the open or on a minor bounce into resistance; size to 1-2% of account.\n"
+                f"  - **Exit**: target 50% of max value; stop out if flow flips long or dark pool turns divergent.\n"
+                f"  - **Why**: net short options premium + dark-pool alignment — defined-risk put spread captures the downside thesis."
+            )
     if vol.get("firing"):
-        ideas.append(f"- **Front-week vertical or calendar spread** to exploit the IV inversion before the catalyst resolves.")
+        ideas.append(
+            f"- **IV Inversion Play** — front-week long calendar spread (sell front, buy 30-day) at-the-money.\n"
+            f"  - **Entry**: at the open; the inversion is already pricing in, no waiting needed.\n"
+            f"  - **Exit**: close before the catalyst event (don't hold through) — capture the IV crush in the front leg. Stop if back-month IV collapses too.\n"
+            f"  - **Why**: front-week IV elevated vs 30-day means front decays faster than back — calendar exploits the differential."
+        )
     if not ideas:
-        ideas.append(f"- **No high-conviction structural setup this week.** Consider sitting out or waiting for a fresh catalyst.")
+        ideas.append(
+            f"- **No high-conviction setup this week.** Sit out or wait for a fresh catalyst.\n"
+            f"  - **Entry**: N/A — no trade.\n"
+            f"  - **Exit**: N/A.\n"
+            f"  - **Why**: pattern detectors aren't firing strongly enough to anchor an entry; forcing a trade here would be noise."
+        )
 
     return f"""**What the gamma chart shows**
 

@@ -227,7 +227,28 @@ Net flow long $2M (dark pool aligned).
     assert "section" in reason.lower()
 
 
-def test_pinned_validator_passes_with_all_sections_and_numbers():
+def test_pinned_validator_passes_with_all_sections_numbers_and_entry_exit():
+    text = """**What the gamma chart shows**
+Dealer gamma concentrated at the 450 strike (spot 449.50). Pin setup.
+
+**What the OI + flow data shows**
+Net flow long $2000000 with dark pool aligned.
+
+**What the vol regime shows**
+Front-week IV vs 30-day normal, IV rank 65.
+
+**Best contracts for the week**
+- **Pinning Play** — 450 call (front-week, 4 DTE)
+  - **Entry**: at the open if spot within $1 of 450.
+  - **Exit**: target 50% credit; stop if 450 breaks decisively.
+  - **Why**: captures gamma pin upside."""
+    ok, reason = validate_pinned_output(text,
+        must_contain_numbers=[450, 449.50, 2_000_000, 65, 4])
+    assert ok is True, f"expected OK, got: {reason}"
+
+
+def test_pinned_validator_rejects_trade_ideas_without_entry_exit():
+    """Trade idea bullets without Entry/Exit markers should be rejected."""
     text = """**What the gamma chart shows**
 Dealer gamma concentrated at the 450 strike (spot 449.50). Pin setup.
 
@@ -241,11 +262,32 @@ Front-week IV vs 30-day normal, IV rank 65.
 - 450 call (front-week, 4 DTE) — captures gamma pin upside."""
     ok, reason = validate_pinned_output(text,
         must_contain_numbers=[450, 449.50, 2_000_000, 65, 4])
-    assert ok is True, f"expected OK, got: {reason}"
+    assert ok is False
+    assert "entry" in reason.lower() or "exit" in reason.lower()
+
+
+def test_pinned_validator_allows_no_trade_output_without_entry_exit():
+    """When patterns aren't firing, the 'no high-conviction setup' phrasing is
+    a valid output and shouldn't be rejected for missing Entry markers."""
+    text = """**What the gamma chart shows**
+Gamma is balanced across strikes with no concentration near spot 100.0.
+
+**What the OI + flow data shows**
+Flow is neutral, $50000 net (below threshold).
+
+**What the vol regime shows**
+Vol term structure normal.
+
+**Best contracts for the week**
+No high-conviction structural setup this week — wait for a fresh catalyst or sit out."""
+    ok, reason = validate_pinned_output(text,
+        must_contain_numbers=[100, 50_000])
+    assert ok is True, f"expected OK for no-trade output, got: {reason}"
 
 
 def test_pinned_validator_requires_sufficient_numeric_grounding():
-    """All sections present but only 1 number cited from a payload with 5 numbers."""
+    """All sections + Entry/Exit present but only 1 number cited from a
+    payload with 5 numbers — should fail on numeric-grounding check."""
     text = """**What the gamma chart shows**
 The dealer positioning looks interesting near spot.
 
@@ -256,10 +298,12 @@ There's some flow happening.
 Vol regime is normal.
 
 **Best contracts for the week**
-- A call at 450."""
-    # Only "450" cited; payload has 5 distinct numbers
+- **A Trade** — call at 450.
+  - **Entry**: at the open.
+  - **Exit**: 50% profit.
+  - **Why**: vague."""
     ok, reason = validate_pinned_output(text,
-        must_contain_numbers=[450, 449.50, 2_000_000, 65, 4],
+        must_contain_numbers=[449.50, 2_000_000, 65, 4],   # 450 NOT in must-contain; "50" appears but that's an exit %, not a payload number
         min_numbers_cited=3)
     assert ok is False
     assert "numeric" in reason.lower() or "ground" in reason.lower()
@@ -271,6 +315,27 @@ def test_pinned_fallback_has_all_four_sections():
                     "What the vol regime shows", "Best contracts for the week"):
         assert section in text, f"fallback missing section: {section}"
     assert "NVDA" not in text or "450" in text  # firing pinning at 450 → should appear
+
+
+def test_pinned_fallback_includes_entry_exit_per_trade():
+    """The deterministic fallback must include Entry/Exit framework so it
+    matches the structure the AI prompt requires."""
+    text = fallback_pinned_summary("NVDA", SAMPLE_PATTERNS, SAMPLE_KEY_NUMBERS)
+    # Sample patterns has pinning + flow firing → both should appear with Entry/Exit
+    assert "Entry" in text
+    assert "Exit" in text
+    # The fallback should pass the same validator the AI output passes
+    ok, reason = validate_pinned_output(text, must_contain_numbers=[450, 449.50, 65, 4])
+    assert ok is True, f"fallback failed validator: {reason}"
+
+
+def test_pinned_fallback_no_firing_still_includes_entry_exit_markers():
+    """Even the 'no trade' fallback path includes Entry/Exit (with N/A) so the
+    structure is consistent."""
+    patterns = {k: {"firing": False, "intensity": 0.0, "note": {}}
+                for k in ("pinning", "gamma_squeeze", "flow", "vol_regime")}
+    text = fallback_pinned_summary("SPY", patterns, {"spot": 745.0})
+    assert "no high-conviction" in text.lower() or "sit out" in text.lower()
 
 
 def test_pinned_fallback_no_firing_says_so():
@@ -293,7 +358,8 @@ def test_summarize_pinned_uses_fallback_on_invalid_output(monkeypatch):
 
 
 def test_summarize_pinned_uses_gemini_when_output_valid(monkeypatch):
-    """A well-formed Gemini response with all sections + numbers passes through."""
+    """A well-formed Gemini response with all sections, numbers, AND
+    Entry/Exit per trade idea passes through."""
     def good(p):
         return ("""**What the gamma chart shows**
 Dealer gamma concentrated at 450 strike (spot 449.50, 4 DTE). Pin tends to attract price into expiry.
@@ -305,14 +371,22 @@ Net flow long $2000000. Dark pool aligned with the call side — equity desk agr
 Normal term structure. IV rank 65 — vol is moderately elevated.
 
 **Best contracts for the week**
-- 450 call (front-week) — rides the pin with limited downside.
-- 450/455 call vertical — defined risk if the pin holds.""",
+- **Pinning Play** — 450 call (front-week)
+  - **Entry**: at the open if spot within $1 of 450.
+  - **Exit**: target 50% credit by Thursday; stop if 450 breaks decisively.
+  - **Why**: rides the pin with limited downside.
+- **Defined-Risk Bullish** — 450/455 call vertical
+  - **Entry**: at the open or on a minor pullback.
+  - **Exit**: target 50% max value; stop if flow flips short.
+  - **Why**: defined risk while the pin holds.""",
                 {"input_tokens": 400, "output_tokens": 200})
     monkeypatch.setattr("src.synth._call_gemini_pinned", good)
     out = summarize_pinned("NVDA", SAMPLE_PATTERNS, SAMPLE_KEY_NUMBERS)
     assert "Best contracts" in out
     assert "450 call" in out
     assert "Dealer gamma" in out
+    assert "Entry" in out
+    assert "Exit" in out
 
 
 def test_summarize_pinned_falls_back_on_gemini_exception(monkeypatch):
