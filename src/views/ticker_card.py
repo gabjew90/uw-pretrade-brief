@@ -119,12 +119,16 @@ def render(ticker: str, td: "fetch.TickerData", synthesis: str, patterns: dict):
             if "_error" in pct_ctx:
                 st.caption(f"📊 30-day percentile context: failed ({pct_ctx['_error']})")
             elif pct_ctx:
-                # Each metric contributes two entries (_pct_7d + _7d_sample_n),
-                # so divide by 2 to count metrics. Sample size taken from the
-                # first metric is representative (all share the same fetch).
+                # Sample sizes can differ per metric (concentration is computed
+                # only when nearby strikes exist; others fall back to any spot
+                # value). Show min-max range rather than a single number so the
+                # user isn't misled when one metric has thinner history.
                 n_metrics = sum(1 for k in pct_ctx if k.endswith("_pct_7d"))
-                first_n = next((v for k, v in pct_ctx.items() if k.endswith("_sample_n")), None)
-                n_note = f", n={int(first_n)}" if first_n else ""
+                ns = [int(v) for k, v in pct_ctx.items() if k.endswith("_sample_n") and v]
+                if ns:
+                    n_note = f", n={min(ns)}" if min(ns) == max(ns) else f", n={min(ns)}-{max(ns)}"
+                else:
+                    n_note = ""
                 st.caption(f"📊 30-day percentile context: {n_metrics} metrics loaded{n_note}")
             else:
                 st.caption("📊 30-day percentile context: no history available (insufficient samples)")

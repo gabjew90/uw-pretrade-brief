@@ -198,18 +198,31 @@ Write a structured walkthrough that:
 
 OUTPUT FORMAT (markdown, 4 sections, each labeled):
 
+Each of the first three sections MUST be structured as three subsections in this exact order: **Define → Read the chart → Percentile context**. Use these literal italic labels inline: `_Define:_`, `_Read the chart:_`, `_Percentile context:_`. Do NOT collapse them into a single paragraph — separate with blank lines.
+
 **What the gamma chart shows**
-- 2-3 sentences. Reference the actual numbers from the patterns/key_numbers payload (spot, max-pain, pin strike if firing).
-- Translate: "dealer gamma exposure" = the amount of stock market makers need to buy/sell to stay hedged when spot moves 1%. Positive = dealers long γ (stabilizing, pinning). Negative = dealers short γ (destabilizing, squeeze fuel).
-- Name what's structurally happening for this ticker: a pin? a wall? clean range?
+
+`_Define:_` 1-2 sentences. Define **dealer γ** (rate-of-change of hedging needs as price moves; positive = stabilizing / pinning, negative = destabilizing / squeeze fuel) and **pin concentration** (fraction of |γ| in ±5% band at dominant strike, 0–1).
+
+`_Read the chart:_` 2-3 sentences with the ACTUAL numbers for THIS ticker. Cite the dominant strike, the concentration value (e.g. "0.337 = 33.7% of band's |γ|"), summed net γ above and below spot in billions, and whether the pin or squeeze pattern is firing. The reader should be able to look at the chart bars and match each one to your description.
+
+`_Percentile context:_` 1-3 sentences. For each gamma metric present in key_numbers (`concentration_pct_7d`, `squeeze_above_pct_7d`, `squeeze_below_pct_7d`), state the percentile and interpret it via the calibration above. If sample_n is low, acknowledge it.
 
 **What the OI + flow data shows**
-- 2-3 sentences. Reference flow direction + dark pool corroboration if present.
-- Translate UW concepts: net options premium = $ flow direction; dark pool prints classified by tick rule (price > NBBO midpoint = buyer-initiated, etc.); "aligned" dark pool means equity desk agrees with options crowd.
-- Name the directional bias (or lack of it).
+
+`_Define:_` 2-3 sentences. Define **open interest (OI)** (contracts outstanding per strike, calls above axis, puts mirrored below), **net premium** (calls $ minus puts $; sign = direction), **skew** (|net|/total, 0 = balanced, 1 = one-sided), **max pain** (strike where most options expire worthless; price often drifts toward it), and **dark pool alignment** (aligned vs divergent vs weak_dp).
+
+`_Read the chart:_` 2-3 sentences with the ACTUAL numbers. Cite net premium USD, total premium USD, skew value, dark pool net USD + alignment, max pain strike + distance from spot (%). The reader should see your description match the bars on the OI chart and the row in the badge.
+
+`_Percentile context:_` 1-3 sentences. For each flow metric present in key_numbers (`net_premium_pct_7d`, `skew_pct_7d`, `max_pain_distance_pct_pct_7d`), state the percentile and interpret it.
 
 **What the vol regime shows**
-- 1-2 sentences. Front-week IV vs 30-day IV. If inverted (≥5 vol points), explain it means the market is pricing an event-driven near-term catalyst (earnings, FOMC, scheduled news). If normal, say so plainly.
+
+`_Define:_` 1-2 sentences. Define **IV term structure** (IV vs DTE curve; normal slopes upward = contango), **inversion** (front-week IV > 30-day IV, signals near-term catalyst), and **IV rank** (today's 30-day IV percentile in its own 52-week range).
+
+`_Read the chart:_` 1-2 sentences. Cite front-week IV %, 30-day IV %, spread in vol points, whether the curve is INVERTED or in normal contango, IV rank value. Match what the line+markers on the chart show.
+
+`_Percentile context:_` 1-2 sentences for `front_iv_pct_7d` and `term_spread_pts_pct_7d`.
 
 **Best contracts for the week**
 - 2-4 specific trade ideas, each formatted as a bullet with **bold name + structure** followed by THREE sub-bullets in this exact order:
@@ -447,53 +460,135 @@ def fallback_pinned_summary(ticker: str, patterns: dict, key_numbers: dict) -> s
     iv_rank = kn.get("iv_rank")
     dte = kn.get("dte")
 
-    # Gamma section
+    # Gamma section — Define → Read chart → Percentile
     pin = p.get("pinning", {})
     sq = p.get("gamma_squeeze", {})
+    pin_note = pin.get("note", {}) if isinstance(pin.get("note"), dict) else {}
+    sq_note = sq.get("note", {}) if isinstance(sq.get("note"), dict) else {}
+    concentration = pin_note.get("concentration")
+    above_sum = sq_note.get("above_sum")
+    below_sum = sq_note.get("below_sum")
+    pin_strike = pin_note.get("strike")
+
+    gamma_define = (
+        "_Define:_ **Dealer γ** (gamma) is the rate-of-change of dealer hedging needs as price moves — "
+        "positive γ means dealers BUY into dips and SELL into rallies (stabilizing, pulls price toward the strike). "
+        "Negative γ means dealers SELL into dips and BUY into rallies (destabilizing, amplifies moves). "
+        "**Pin concentration** = the fraction of total |γ| within ±5% of spot that sits at the single dominant strike (0–1; higher = more concentrated)."
+    )
+    read_bits = []
+    if pin_strike is not None and concentration is not None:
+        read_bits.append(
+            f"Dominant strike is **{pin_strike}** (spot {spot_str}); pin concentration = **{concentration:.3f}** "
+            f"({concentration*100:.1f}% of nearby |γ| sits at one strike)."
+        )
+    elif pin_strike is not None:
+        read_bits.append(f"Dominant strike is **{pin_strike}** (spot {spot_str}).")
+    if above_sum is not None and below_sum is not None:
+        a_b = f"{above_sum/1e9:+.2f}B"
+        b_b = f"{below_sum/1e9:+.2f}B"
+        read_bits.append(f"Summed net γ above spot = **{a_b}**, below spot = **{b_b}**.")
     if pin.get("firing"):
-        strike = pin["note"].get("strike", "?")
-        gamma_msg = (f"Dealer gamma is heavily concentrated at the **{strike}** strike "
-                     f"(spot at {spot_str}). When dealers are long gamma at a strike near "
-                     f"spot, their hedging activity tends to pin price toward that strike "
-                     f"into expiry.")
+        read_bits.append("Pin pattern is **firing** — expect price to gravitate toward the dominant strike into expiry.")
     elif sq.get("firing"):
-        direction = sq["note"].get("direction", "?")
-        gamma_msg = (f"Dealer gamma asymmetry suggests a **squeeze {direction}** setup. "
-                     f"Dealers are net short gamma on that side; if price crosses, they "
-                     f"chase, amplifying the move.")
+        direction = sq_note.get("direction", "?")
+        read_bits.append(f"Squeeze pattern is **firing {direction}** — if price crosses, dealer hedging amplifies the move.")
     else:
-        gamma_msg = (f"No high-concentration gamma feature near spot {spot_str}. "
-                     f"Dealer hedging pressure is balanced; expect mean-reverting behavior.")
-    # 30-day percentile context for the gamma-side metrics
-    gamma_msg += _pct_line(kn, "concentration", "pin concentration")
-    gamma_msg += _pct_line(kn, "squeeze_above", "net γ above spot")
-    gamma_msg += _pct_line(kn, "squeeze_below", "net γ below spot")
+        read_bits.append("Neither pin nor squeeze pattern firing — dealer hedging is balanced; expect mean-reverting behavior.")
+    gamma_read = "_Read the chart:_ " + " ".join(read_bits)
 
-    # Flow section
+    gamma_pct = "_Percentile context:_" + (
+        _pct_line(kn, "concentration", "pin concentration")
+        + _pct_line(kn, "squeeze_above", "net γ above spot")
+        + _pct_line(kn, "squeeze_below", "net γ below spot")
+    )
+    if gamma_pct == "_Percentile context:_":
+        gamma_pct = ""  # no history available — omit entirely
+    gamma_msg = "\n\n".join(s for s in (gamma_define, gamma_read, gamma_pct) if s)
+
+    # Flow + OI section — Define → Read chart → Percentile
     flow = p.get("flow", {})
-    if flow.get("firing"):
-        side = flow["note"].get("side", "?")
-        net = flow["note"].get("net_premium_usd", 0)
-        dp = flow["note"].get("dp_alignment", "n/a")
-        flow_msg = (f"Net options premium is **{side}** at ${net/1e6:+.1f}M. "
-                    f"Dark pool alignment: **{dp}**. Aligned dark pool means the equity "
-                    f"desk corroborates the options crowd; divergent means they disagree.")
-    else:
-        flow_msg = "Options flow is neutral — no large directional premium imbalance today."
-    flow_msg += _pct_line(kn, "net_premium", "net premium")
-    flow_msg += _pct_line(kn, "skew", "flow skew (0 = balanced, 1 = one-sided)")
-    flow_msg += _pct_line(kn, "max_pain_distance_pct", "max-pain distance")
+    flow_note = flow.get("note", {}) if isinstance(flow.get("note"), dict) else {}
+    net_prem = flow_note.get("net_premium_usd")
+    total_prem = flow_note.get("total_premium_usd")
+    skew_val = flow_note.get("skew")
+    side = flow_note.get("side")
+    dp_align = flow_note.get("dp_alignment")
+    dp_prem = flow_note.get("dp_net_premium_usd")
+    mp_dist_pct = ((spot - max_pain) / spot * 100) if (spot and max_pain and spot > 0) else None
 
-    # Vol section
+    flow_define = (
+        "_Define:_ **Open interest (OI)** = number of contracts outstanding at each strike (call OI above the axis, put OI mirrored below). "
+        "**Net premium** = call $ premium traded minus put $ premium traded today; positive = bullish flow, negative = bearish. "
+        "**Skew** = |net premium| / total premium (0 = perfectly balanced, 1 = 100% one-sided). "
+        "**Max pain** = the strike where the most options expire worthless; price often drifts toward it into expiry. "
+        "**Dark pool alignment** = whether the equity desk's net buying matches the options crowd (`aligned`) or contradicts it (`divergent`)."
+    )
+    flow_bits = []
+    if net_prem is not None:
+        flow_bits.append(f"Net options premium = **${net_prem/1e6:+.1f}M** ({side or 'n/a'}).")
+    if total_prem is not None:
+        flow_bits.append(f"Total premium = **${total_prem/1e6:.1f}M**.")
+    if skew_val is not None:
+        flow_bits.append(f"Skew = **{skew_val:.3f}** ({skew_val*100:.0f}% one-sided).")
+    if dp_align:
+        dp_str = f"${dp_prem/1e6:+.1f}M" if dp_prem is not None else "n/a"
+        flow_bits.append(f"Dark pool net = **{dp_str}**, alignment with options flow = **{dp_align}**.")
+    if max_pain is not None:
+        mp_extra = f" ({mp_dist_pct:+.2f}% from spot)" if mp_dist_pct is not None else ""
+        flow_bits.append(f"Max pain strike = **{max_pain}**{mp_extra}.")
+    if not flow_bits:
+        flow_bits.append("Flow data unavailable for this period.")
+    flow_read = "_Read the chart:_ " + " ".join(flow_bits)
+
+    flow_pct = "_Percentile context:_" + (
+        _pct_line(kn, "net_premium", "net premium")
+        + _pct_line(kn, "skew", "flow skew")
+        + _pct_line(kn, "max_pain_distance_pct", "max-pain distance")
+    )
+    if flow_pct == "_Percentile context:_":
+        flow_pct = ""
+    flow_msg = "\n\n".join(s for s in (flow_define, flow_read, flow_pct) if s)
+
+    # Vol section — Define → Read chart → Percentile
     vol = p.get("vol_regime", {})
+    vol_note = vol.get("note", {}) if isinstance(vol.get("note"), dict) else {}
+    front_iv = vol_note.get("front_iv")
+    iv_30d = vol_note.get("iv_30d")
+    spread_pts = vol_note.get("front_minus_30d_pts")
+    regime = vol_note.get("regime", "?")
+
+    vol_define = (
+        "_Define:_ **IV term structure** plots implied volatility against days-to-expiry. "
+        "Normal markets are in **contango** — front-week IV LOWER than 30-day IV (back-month options pricier per day). "
+        "**Inversion** = front-week IV HIGHER than 30-day IV; signals an event-driven catalyst priced in the near term (earnings, FOMC, news). "
+        "**IV rank (IVR)** = where today's 30-day IV sits in its own 52-week range (0 = year-low, 100 = year-high)."
+    )
+    vol_bits = []
+    if front_iv is not None:
+        vol_bits.append(f"Front-week IV = **{front_iv*100:.1f}%**.")
+    if iv_30d is not None:
+        vol_bits.append(f"30-day IV = **{iv_30d*100:.1f}%**.")
+    if spread_pts is not None:
+        direction = "INVERTED" if spread_pts > 0 else "in normal contango"
+        vol_bits.append(f"Spread (front − 30d) = **{spread_pts:+.2f} vol pts** — curve is {direction}.")
+    if iv_rank is not None:
+        vol_bits.append(f"IV rank = **{iv_rank:.0f}** out of 100.")
     if vol.get("firing"):
-        pts = vol["note"].get("front_minus_30d_pts", "?")
-        vol_msg = (f"Front-week IV exceeds 30-day IV by **{pts} vol points** — the market "
-                   f"is pricing an event-driven near-term catalyst (earnings, FOMC, news).")
-    else:
-        vol_msg = f"Vol term structure is normal. IV rank {iv_rank if iv_rank else '?'}."
-    vol_msg += _pct_line(kn, "front_iv", "front-week IV")
-    vol_msg += _pct_line(kn, "term_spread_pts", "term-structure spread (front − 30d)")
+        vol_bits.append("Vol-regime pattern is **firing** — near-term richness suggests a catalyst.")
+    elif regime == "normal":
+        vol_bits.append("Vol-regime pattern is **NOT firing** — no event-driven IV inversion this week.")
+    if not vol_bits:
+        vol_bits.append("Term-structure data unavailable for this period.")
+    vol_read = "_Read the chart:_ " + " ".join(vol_bits)
+
+    vol_pct = "_Percentile context:_" + (
+        _pct_line(kn, "front_iv", "front-week IV")
+        + _pct_line(kn, "term_spread_pts", "term-structure spread (front − 30d)")
+    )
+    if vol_pct == "_Percentile context:_":
+        vol_pct = ""
+    vol_msg = "\n\n".join(s for s in (vol_define, vol_read, vol_pct) if s)
 
     # Trade ideas section — straight from the firing patterns, with Entry/Exit
     # framework so the trader knows WHEN to act, not just WHAT to trade.
