@@ -1,6 +1,10 @@
 # Weekly Options Pre-Trade Brief
 
-A Streamlit dashboard that scans a watchlist of 10–30 tickers and shows which structural options-trade pattern is firing on each right now — using Unusual Whales data on dealer positioning, dark pool prints, flow, and volatility.
+A Streamlit dashboard that scans a watchlist of 10–30 tickers, shows which structural options-trade pattern is firing on each, and uses Gemini to walk the reader through what the data means and which contracts fit the setup for the week. Data from Unusual Whales (dealer positioning, dark pool prints, flow, volatility).
+
+> ## ⚠️ NOT INVESTMENT ADVICE
+>
+> The AI-generated trade ideas are derived from structural options data and represent one reading of the patterns. They are **NOT recommendations** to buy, sell, or hold any security. Options trading involves substantial risk of loss including loss of principal. Past patterns do not predict future outcomes. You are solely responsible for your own trading decisions. Consult a licensed financial advisor before making any trade. By using this tool you accept this disclaimer.
 
 **Open source** — MIT licensed. Each user runs it with their own Unusual Whales API key (see [Self-host](#self-host) below).
 
@@ -21,15 +25,16 @@ Each row in the scan tells you whether a ticker is currently exhibiting one of f
 
 Tap any row to see the supporting charts (net dealer gamma profile, open interest with call/put walls + max-pain, IV term structure) in a pinned card at the top.
 
-Each row also has a **1–2 sentence AI headline** written by Gemini Flash Lite. The synthesis is constrained to add information beyond what the badges already show — it cites specific numbers, surfaces cross-pattern tensions, and is auto-rejected (falling back to a deterministic template) if it slips into prescriptive language.
+**Two-tier AI synthesis** (Gemini Flash Lite):
+- **Scan row headline** — 1–2 sentence cross-pattern observation per ticker, for fast triage. Stays observational; auto-rejected if it slips into prescriptive language.
+- **Pinned card walkthrough** — a multi-paragraph educational walkthrough when you tap into a ticker. Walks through what each chart shows, translates Unusual Whales concepts inline, and names specific trade structures + contracts that fit the firing setup for the week.
 
-## What it is NOT
+## Scope
 
-- **Not a trade signal generator.** No "buy this" calls. No conviction scores. No predictions.
-- **Not a backtester.** No claims of edge.
-- **Not a journal.** Sessions don't persist; trade logging is intentionally not included.
-- **Not multi-user.** The Unusual Whales API tier in use is licensed for personal use only.
-- **Not real-time.** 30-day lookback maximum, REST polling, no WebSocket streaming.
+- **Not multi-user** — the Unusual Whales API tier in use is licensed for personal use only. To share the tool, fork the repo and self-host with your own UW key.
+- **Not a backtester** — no historical edge claims, no win-rate stats.
+- **Not a journal** — sessions don't persist; trade logging is intentionally not included.
+- **Not real-time** — 30-day lookback maximum, REST polling, no WebSocket streaming.
 
 ## Demo / API usage notice
 

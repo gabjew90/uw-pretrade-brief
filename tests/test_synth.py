@@ -8,6 +8,10 @@ from src.synth import (
     fallback_summary,
     summarize,
     _substance_beats_fallback,
+    build_pinned_prompt,
+    validate_pinned_output,
+    fallback_pinned_summary,
+    summarize_pinned,
 )
 
 
@@ -185,3 +189,136 @@ def test_summarize_falls_back_on_gemini_exception(monkeypatch):
     monkeypatch.setattr("src.synth._call_gemini", boom)
     out = summarize("NVDA", SAMPLE_PATTERNS, SAMPLE_KEY_NUMBERS)
     assert "NVDA" in out
+
+
+# ---------- PINNED-CARD synthesis (long, with recommendations) ----------
+
+def test_pinned_prompt_contains_section_directives_and_disclaimer_note():
+    p = build_pinned_prompt("NVDA", SAMPLE_PATTERNS, SAMPLE_KEY_NUMBERS)
+    assert "NVDA" in p
+    # All four section headers in the instructions
+    for section in ("What the gamma chart shows", "What the OI",
+                    "What the vol regime shows", "Best contracts for the week"):
+        assert section in p
+    # Prompt should explicitly tell model the disclaimer is already shown
+    assert "disclaimer" in p.lower()
+
+
+def test_pinned_prompt_includes_contracts_summary_when_provided():
+    summary = "450.00 call expiry 2026-05-29: bid 2.10 ask 2.15 IV 18.0%"
+    p = build_pinned_prompt("NVDA", SAMPLE_PATTERNS, SAMPLE_KEY_NUMBERS,
+                            contracts_summary=summary)
+    assert summary in p
+
+
+def test_pinned_validator_requires_all_four_sections():
+    """Missing any section header → rejected."""
+    text = """**What the gamma chart shows**
+Pinning at 450 (spot 449.50, max-pain 450).
+
+**What the OI + flow data shows**
+Net flow long $2M (dark pool aligned).
+
+**Best contracts for the week**
+- 450 call expiring next Friday."""
+    # Missing 'What the vol regime shows' section
+    ok, reason = validate_pinned_output(text, must_contain_numbers=[450, 449.50])
+    assert ok is False
+    assert "section" in reason.lower()
+
+
+def test_pinned_validator_passes_with_all_sections_and_numbers():
+    text = """**What the gamma chart shows**
+Dealer gamma concentrated at the 450 strike (spot 449.50). Pin setup.
+
+**What the OI + flow data shows**
+Net flow long $2000000 with dark pool aligned.
+
+**What the vol regime shows**
+Front-week IV vs 30-day normal, IV rank 65.
+
+**Best contracts for the week**
+- 450 call (front-week, 4 DTE) — captures gamma pin upside."""
+    ok, reason = validate_pinned_output(text,
+        must_contain_numbers=[450, 449.50, 2_000_000, 65, 4])
+    assert ok is True, f"expected OK, got: {reason}"
+
+
+def test_pinned_validator_requires_sufficient_numeric_grounding():
+    """All sections present but only 1 number cited from a payload with 5 numbers."""
+    text = """**What the gamma chart shows**
+The dealer positioning looks interesting near spot.
+
+**What the OI + flow data shows**
+There's some flow happening.
+
+**What the vol regime shows**
+Vol regime is normal.
+
+**Best contracts for the week**
+- A call at 450."""
+    # Only "450" cited; payload has 5 distinct numbers
+    ok, reason = validate_pinned_output(text,
+        must_contain_numbers=[450, 449.50, 2_000_000, 65, 4],
+        min_numbers_cited=3)
+    assert ok is False
+    assert "numeric" in reason.lower() or "ground" in reason.lower()
+
+
+def test_pinned_fallback_has_all_four_sections():
+    text = fallback_pinned_summary("NVDA", SAMPLE_PATTERNS, SAMPLE_KEY_NUMBERS)
+    for section in ("What the gamma chart shows", "What the OI",
+                    "What the vol regime shows", "Best contracts for the week"):
+        assert section in text, f"fallback missing section: {section}"
+    assert "NVDA" not in text or "450" in text  # firing pinning at 450 → should appear
+
+
+def test_pinned_fallback_no_firing_says_so():
+    """When no patterns fire, the fallback's trade-ideas section says 'no high-conviction setup'."""
+    patterns = {k: {"firing": False, "intensity": 0.0, "note": {}}
+                for k in ("pinning", "gamma_squeeze", "flow", "vol_regime")}
+    text = fallback_pinned_summary("SPY", patterns, {"spot": 745.0})
+    assert "no high-conviction" in text.lower() or "sitting out" in text.lower()
+
+
+def test_summarize_pinned_uses_fallback_on_invalid_output(monkeypatch):
+    """If Gemini returns text missing required sections, fallback is used."""
+    def short(p):
+        return "Just a short observation about the data.", {"input_tokens": 100, "output_tokens": 20}
+    monkeypatch.setattr("src.synth._call_gemini_pinned", short)
+    out = summarize_pinned("NVDA", SAMPLE_PATTERNS, SAMPLE_KEY_NUMBERS)
+    # Fallback used → has the four section headers
+    for section in ("What the gamma chart shows", "Best contracts"):
+        assert section in out
+
+
+def test_summarize_pinned_uses_gemini_when_output_valid(monkeypatch):
+    """A well-formed Gemini response with all sections + numbers passes through."""
+    def good(p):
+        return ("""**What the gamma chart shows**
+Dealer gamma concentrated at 450 strike (spot 449.50, 4 DTE). Pin tends to attract price into expiry.
+
+**What the OI + flow data shows**
+Net flow long $2000000. Dark pool aligned with the call side — equity desk agrees with options crowd.
+
+**What the vol regime shows**
+Normal term structure. IV rank 65 — vol is moderately elevated.
+
+**Best contracts for the week**
+- 450 call (front-week) — rides the pin with limited downside.
+- 450/455 call vertical — defined risk if the pin holds.""",
+                {"input_tokens": 400, "output_tokens": 200})
+    monkeypatch.setattr("src.synth._call_gemini_pinned", good)
+    out = summarize_pinned("NVDA", SAMPLE_PATTERNS, SAMPLE_KEY_NUMBERS)
+    assert "Best contracts" in out
+    assert "450 call" in out
+    assert "Dealer gamma" in out
+
+
+def test_summarize_pinned_falls_back_on_gemini_exception(monkeypatch):
+    def boom(p):
+        raise RuntimeError("quota exceeded")
+    monkeypatch.setattr("src.synth._call_gemini_pinned", boom)
+    out = summarize_pinned("NVDA", SAMPLE_PATTERNS, SAMPLE_KEY_NUMBERS)
+    # Fallback used
+    assert "What the gamma chart shows" in out

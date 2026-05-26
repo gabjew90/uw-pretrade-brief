@@ -1,0 +1,42 @@
+[   13254ms] [ERROR] Failed to load resource: the server responded with a status of 403 () @ https://uw-pretrade-brief.streamlit.app/api/v1/app/event/open:0
+[   14186ms] [LOG] INITIAL -> (5, 0, ) -> RUNNING @ https://uw-pretrade-brief.streamlit.app/-/build/assets/bufferedData-CKlkiO8t.js:4
+[   14194ms] [WARNING] Unrecognized feature: 'ambient-light-sensor'. @ https://uw-pretrade-brief.streamlit.app/-/build/assets/routes-B0aSYRS-.js:0
+[   14194ms] [WARNING] Unrecognized feature: 'battery'. @ https://uw-pretrade-brief.streamlit.app/-/build/assets/routes-B0aSYRS-.js:0
+[   14194ms] [WARNING] Unrecognized feature: 'document-domain'. @ https://uw-pretrade-brief.streamlit.app/-/build/assets/routes-B0aSYRS-.js:0
+[   14194ms] [WARNING] Unrecognized feature: 'layout-animations'. @ https://uw-pretrade-brief.streamlit.app/-/build/assets/routes-B0aSYRS-.js:0
+[   14195ms] [WARNING] Unrecognized feature: 'legacy-image-formats'. @ https://uw-pretrade-brief.streamlit.app/-/build/assets/routes-B0aSYRS-.js:0
+[   14195ms] [WARNING] Unrecognized feature: 'oversized-images'. @ https://uw-pretrade-brief.streamlit.app/-/build/assets/routes-B0aSYRS-.js:0
+[   14195ms] [WARNING] Unrecognized feature: 'vr'. @ https://uw-pretrade-brief.streamlit.app/-/build/assets/routes-B0aSYRS-.js:0
+[   14195ms] [WARNING] Unrecognized feature: 'wake-lock'. @ https://uw-pretrade-brief.streamlit.app/-/build/assets/routes-B0aSYRS-.js:0
+[   14843ms] [WARNING] An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing. @ https://uw-pretrade-brief.streamlit.app/~/+/?ticker=SPY:0
+[   19319ms] [INFO] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: https://uw-pretrade-brief.streamlit.app/~/+/static/media/SourceSansVF-Italic.ttf.Bt9VkdQ3.woff2 @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/utils.D9m7Ykmm.js:2
+[   93075ms] [INFO] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: https://uw-pretrade-brief.streamlit.app/~/+/static/media/SourceCodeVF-Upright.ttf.BjWn63N-.woff2 @ :3119
+[ 1818200ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[ 3620037ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[ 5421690ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[ 7223430ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[ 9025117ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[10826799ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[12628540ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[14430290ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[16231908ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[16732678ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[16735051ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[18537240ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[20338942ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[22141849ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[23943836ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[25745564ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[27547433ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[29349183ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[31150986ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[32952717ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[34754598ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[36556328ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[38358121ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[40160076ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[41961963ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[43763700ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[45565514ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[47367259ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17
+[49169210ms] [WARNING] WebSocket onclose @ https://uw-pretrade-brief.streamlit.app/~/+/static/js/index.D2ZqaFuW.js:17

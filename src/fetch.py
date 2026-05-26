@@ -138,13 +138,25 @@ def _bumped_call_count() -> int:
 
 @st.cache_data(ttl=SYNTH_TTL_S, show_spinner=False)
 def synthesize_one(ticker: str, _cache_key: str, patterns: dict, key_numbers: dict) -> str:
-    """Cached wrapper around synth.summarize. Cache hits don't increment counter.
+    """Cached wrapper around synth.summarize (scan-row, short). Cache hits
+    don't increment counter.
 
     Hard cost guard: if session synth calls exceed SYNTH_SESSION_CALL_LIMIT,
     return the deterministic fallback without hitting Gemini."""
     if _bumped_call_count() > SYNTH_SESSION_CALL_LIMIT:
         return _synth.fallback_summary(ticker, patterns, key_numbers)
     return _synth.summarize(ticker, patterns, key_numbers)
+
+
+@st.cache_data(ttl=SYNTH_TTL_S, show_spinner=False)
+def synthesize_pinned(ticker: str, _cache_key: str, patterns: dict, key_numbers: dict,
+                      contracts_summary: str | None = None) -> str:
+    """Pinned-card synthesis (long, walkthrough + trade recommendations).
+    ~5-7x the token cost of synthesize_one — only called when a ticker is
+    actively pinned, not for every scan row."""
+    if _bumped_call_count() > SYNTH_SESSION_CALL_LIMIT:
+        return _synth.fallback_pinned_summary(ticker, patterns, key_numbers)
+    return _synth.summarize_pinned(ticker, patterns, key_numbers, contracts_summary)
 
 
 def synthesize_batch(rows: list[dict]) -> dict[str, str]:

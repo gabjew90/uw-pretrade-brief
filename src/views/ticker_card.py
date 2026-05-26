@@ -36,11 +36,17 @@ def render_empty():
 
 
 def render(ticker: str, td: "fetch.TickerData", synthesis: str, patterns: dict):
-    """Render the pinned card for a ticker."""
+    """Render the pinned card for a ticker.
+
+    `synthesis` here is the LONG pinned-card walkthrough (4-section markdown
+    with trade ideas), not the short scan-row headline. Caller responsible
+    for passing the right one (see app.py)."""
     head_col, close_col = st.columns([10, 1])
     with head_col:
         st.markdown(f"### {ticker}")
-        st.markdown(f"_{synthesis}_")
+        # Render the multi-paragraph markdown directly (no italics wrap; the
+        # walkthrough has its own structure with bold section headers)
+        st.markdown(synthesis)
         # Context strip: spot · IV rank · earnings · max pain
         meta = []
         if td.spot:

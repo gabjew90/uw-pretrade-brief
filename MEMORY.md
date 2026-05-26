@@ -31,6 +31,15 @@ Read at session start. Never contradict a logged decision without flagging it fi
 **Rejected:** API Advanced ($375/mo, 90-day lookback) — would relax the 30-day data window but isn't justified for a Sunday demo. Startup tier ($625/mo) — would unlock commercial use + redistribution but the operator's framing is personal-use decision-support.
 **Knock-on:** CLAUDE.md updated. README license disclaimer still correct as written.
 
+## 2026-05-25 — Two-tier synthesis: scan-row observational, pinned-card prescriptive
+
+**Decided:** Synthesis is now TWO functions with different prompts and validators:
+- `synth.summarize()` for scan-row headlines — unchanged: 1-2 sentences, observational, FORBIDDEN_RE blocks prescriptive language
+- `synth.summarize_pinned()` (new) for pinned-card walkthrough — multi-paragraph markdown with four sections (gamma walkthrough, OI+flow walkthrough, vol walkthrough, **Best contracts for the week**). MAY name specific contracts. Validator drops the prescriptive-language blocklist but requires section headers + ≥3 numbers cited from payload.
+**Why:** Operator pivoted to "tell users best options to trade" framing. Acknowledged the legal exposure (Investment Advisers Act considerations) and accepted it. To minimize liability surface: top-of-app `st.error` banner with full NOT INVESTMENT ADVICE disclaimer, README disclaimer at the top, pinned-synth prompt explicitly tells the model the disclaimer is already shown so it doesn't need to hedge.
+**Rejected:** "Structural-fit only" middle interpretation (recommend trade STRUCTURES but not specific contracts) — operator chose the literal recommendation interpretation. Static "How to read this chart" educational panels — rejected in favor of AI-generated walkthrough that's contextual to the actual data shown.
+**Knock-on:** CLAUDE.md "no predictions" rule rewritten to allow prescriptive language in the pinned synth specifically. README "What it is NOT" rewritten — no longer claims "no buy/sell calls."
+
 ## 2026-05-24 — GEX endpoint: spot-exposures/strike (NOT greek-exposure/strike)
 
 **Decided:** Use `/api/stock/{ticker}/spot-exposures/strike` for net dealer gamma per strike. Parser computes `call_gamma_oi - put_gamma_oi` per row.

@@ -22,11 +22,22 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ---------- Disclaimer (always visible, can't be dismissed) ----------
+st.error(
+    "⚠️ **NOT INVESTMENT ADVICE.** The AI-generated trade ideas on this dashboard are "
+    "derived from structural options data (dealer positioning, flow, volatility) and "
+    "represent one reading of the patterns. They are NOT recommendations to buy, sell, "
+    "or hold any security. Options trading involves substantial risk of loss including "
+    "loss of principal. Past patterns do not predict future outcomes. You are solely "
+    "responsible for your own trading decisions. Consult a licensed financial advisor "
+    "before making any trade."
+)
+
 # ---------- Header ----------
 st.title("Weekly Options Pre-Trade Brief")
 st.caption(
-    "Decision-support for personal weekly options trades. "
-    "Not financial advice. Personal use only."
+    "AI-assisted reading of Unusual Whales options-positioning data. "
+    "Not financial advice. Trade at your own risk."
 )
 
 # ---------- Sidebar ----------
@@ -170,11 +181,34 @@ if pinned:
         "next_earnings": pinned_td.next_earnings,
     }
     pinned_kn = {k: v for k, v in pinned_kn.items() if v is not None}
-    pinned_synth = fetch.synthesize_one(
+    # Build a compact contracts summary string for the pinned-synth prompt.
+    # Lets the AI reference real strikes/bids/asks that match what the user
+    # will see in the picker table below.
+    contracts_for_prompt = None
+    try:
+        from src import uw_client as _uwc
+        contracts = fetch.fetch_one_contracts(pinned)
+        focus = (pinned_patterns.get("pinning", {}).get("note", {}).get("strike")
+                 or pinned_td.max_pain or pinned_td.spot)
+        if focus and contracts:
+            near = _uwc.contracts_near_focus(contracts, float(focus), n_strikes=3)
+            if near:
+                lines = []
+                for c in near:
+                    lines.append(
+                        f"{c['strike']:.2f} {c['type']} expiry {c['expiry']}: "
+                        f"bid {c['bid']:.2f} ask {c['ask']:.2f} IV {c['iv']*100:.1f}%"
+                    )
+                contracts_for_prompt = "\n".join(lines)
+    except Exception:
+        contracts_for_prompt = None
+
+    pinned_synth = fetch.synthesize_pinned(
         pinned,
         fetch._patterns_hash(pinned_patterns, pinned_kn),
         pinned_patterns,
         pinned_kn,
+        contracts_summary=contracts_for_prompt,
     )
     ticker_card.render(pinned, pinned_td, pinned_synth, pinned_patterns)
 else:
