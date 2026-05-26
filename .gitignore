@@ -60,6 +60,12 @@ desktop.ini
 
 # Tooling caches
 .firecrawl/
+.playwright-mcp/
+
+# Ad-hoc screenshots from Playwright verification sessions
+desktop-*.png
+live-*.png
+post-*.png
 
 # Scratch
 reddit-post.json
