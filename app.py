@@ -170,15 +170,29 @@ if pinned:
     }
     pinned_kn = {k: v for k, v in pinned_kn.items() if v is not None}
 
-    # 7-day percentile context for the pinned ticker. Computes today's value
-    # vs the last 7 trading days for each metric where we have history. Lets
+    # 30-day percentile context for the pinned ticker. Computes today's value
+    # vs the last ~30 trading days for each metric where we have history. Lets
     # the synth interpret "is this reading typical or unusual for this ticker?"
+    # All 8 metrics share the same 4-endpoint historical fetch (cached) — no
+    # extra UW API cost for adding metrics that derive from already-fetched payloads.
     try:
+        pin_note = pinned_patterns.get("pinning", {}).get("note", {})
+        sq_note = pinned_patterns.get("gamma_squeeze", {}).get("note", {})
+        flow_note = pinned_patterns.get("flow", {}).get("note", {})
+        vol_note = pinned_patterns.get("vol_regime", {}).get("note", {})
         today_metrics = {
-            "concentration": pinned_patterns.get("pinning", {}).get("note", {}).get("concentration"),
+            "concentration": pin_note.get("concentration"),
+            "squeeze_above": sq_note.get("above_sum"),
+            "squeeze_below": sq_note.get("below_sum"),
             "front_iv": (pinned_td.term[0]["iv"] if pinned_td.term else None),
-            "term_spread_pts": pinned_patterns.get("vol_regime", {}).get("note", {}).get("front_minus_30d_pts"),
-            "net_premium": pinned_patterns.get("flow", {}).get("note", {}).get("net_premium_usd"),
+            "term_spread_pts": vol_note.get("front_minus_30d_pts"),
+            "net_premium": flow_note.get("net_premium_usd"),
+            "skew": flow_note.get("skew"),
+            "max_pain_distance_pct": (
+                (pinned_td.spot - pinned_td.max_pain) / pinned_td.spot * 100
+                if pinned_td.spot and pinned_td.max_pain and pinned_td.spot > 0
+                else None
+            ),
         }
         with st.spinner(f"Computing 30-day percentile context for {pinned} "
                         f"(first load ~30s; cached after)…"):

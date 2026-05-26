@@ -144,130 +144,184 @@ def _percentile_of(value: float, sample: list[float]) -> float | None:
     return round(100 * le / len(clean), 1)
 
 
+# ---------- Raw historical payload fetchers (cached 24h per date) ----------
+# Each helper hits ONE UW endpoint and returns the raw payload. Multiple metric
+# extractors share these via Streamlit's cache so we don't re-hit UW for the same
+# (ticker, endpoint, date) tuple. Net result: 4 endpoints × 30 dates = 120 calls
+# per pinned ticker cold cache, regardless of how many metrics we extract.
+
 @st.cache_data(ttl=HISTORICAL_TTL_S, show_spinner=False)
-def _historical_concentration(ticker: str, date: str) -> float | None:
-    """For one ticker on one date: pinning concentration = top |gamma| at
-    near-spot strikes / sum |gamma| at wider band. Mirrors patterns.detect_pinning
-    but returns the raw concentration scalar so we can build a distribution."""
+def _hist_spot_exposures(ticker: str, date: str) -> dict:
     try:
-        gex_payload = uw_client.fetch_spot_exposures_strike(ticker, date=date)
-        recs = uw_client.gex_records(gex_payload)
-        # Use max-pain as spot proxy for historical (no live spot for past dates)
-        mp_payload = uw_client.fetch_max_pain(ticker, date=date)
-        mp = uw_client.max_pain_value(mp_payload)
-        # If max_pain row carries close, prefer that
+        return uw_client.fetch_spot_exposures_strike(ticker, date=date)
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=HISTORICAL_TTL_S, show_spinner=False)
+def _hist_max_pain(ticker: str, date: str) -> dict:
+    try:
+        return uw_client.fetch_max_pain(ticker, date=date)
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=HISTORICAL_TTL_S, show_spinner=False)
+def _hist_volatility(ticker: str, date: str) -> dict:
+    try:
+        return uw_client.fetch_volatility(ticker, date=date)
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=HISTORICAL_TTL_S, show_spinner=False)
+def _hist_net_prem_ticks(ticker: str, date: str) -> dict:
+    try:
+        return uw_client.fetch_net_prem_ticks(ticker, date=date)
+    except Exception:
+        return {}
+
+
+def _spot_from_max_pain_close(mp_payload: dict) -> float | None:
+    """Historical max-pain payloads include the day's close in the first row.
+    We use it as a spot proxy for past dates (live spot isn't available)."""
+    try:
+        data = mp_payload.get("data") if isinstance(mp_payload, dict) else mp_payload
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            close = data[0].get("close")
+            if close is not None:
+                return float(close)
+    except Exception:
+        pass
+    return None
+
+
+# ---------- Metric extractors (pure: take payloads, return scalar) ----------
+
+def _extract_concentration(gex_payload: dict, spot: float | None) -> float | None:
+    """Pinning concentration: top |gamma| near spot / sum |gamma| in wider band."""
+    recs = uw_client.gex_records(gex_payload)
+    if not recs or not spot or spot <= 0:
+        return None
+    from src.patterns import PIN_BAND, PIN_NEAR
+    near = [r for r in recs if abs(r["strike"] - spot) / spot <= PIN_NEAR]
+    wide = [r for r in recs if abs(r["strike"] - spot) / spot <= PIN_BAND]
+    if not near or not wide:
+        return None
+    top = max(near, key=lambda r: abs(r["gamma"]))
+    denom = sum(abs(r["gamma"]) for r in wide)
+    if denom == 0:
+        return None
+    return abs(top["gamma"]) / denom
+
+
+def _extract_squeeze_sums(gex_payload: dict, spot: float | None) -> tuple[float | None, float | None]:
+    """Net dealer gamma summed above spot, and summed below spot. Negative sums
+    are the 'squeeze fuel' side. Returns (above_sum, below_sum)."""
+    recs = uw_client.gex_records(gex_payload)
+    if not recs or not spot or spot <= 0:
+        return (None, None)
+    above = sum(r["gamma"] for r in recs if r["strike"] > spot)
+    below = sum(r["gamma"] for r in recs if r["strike"] < spot)
+    return (above, below)
+
+
+def _extract_front_iv(vol_payload: dict) -> float | None:
+    term = uw_client.term_structure(vol_payload)
+    for e in term:
+        if e["dte"] <= 7:
+            return float(e["iv"])
+    return None
+
+
+def _extract_term_spread_pts(vol_payload: dict) -> float | None:
+    term = uw_client.term_structure(vol_payload)
+    if not term:
+        return None
+    front = next((e["iv"] for e in term if e["dte"] <= 7), None)
+    monthly_entry = min(term, key=lambda e: abs(e["dte"] - 30))
+    if abs(monthly_entry["dte"] - 30) > 10 or front is None:
+        return None
+    return (front - monthly_entry["iv"]) * 100
+
+
+def _extract_net_premium_and_skew(npt_payload: dict) -> tuple[float | None, float | None]:
+    """Returns (net_premium, skew) for one day from net-prem-ticks payload.
+    skew = |net| / total — 0 means 50/50 calls vs puts, 1 means 100% one side."""
+    data = npt_payload.get("data") if isinstance(npt_payload, dict) else npt_payload
+    if not isinstance(data, list) or not data:
+        return (None, None)
+    total_calls = 0.0
+    total_puts = 0.0
+    for tick in data:
         try:
-            mp_data = mp_payload.get("data") if isinstance(mp_payload, dict) else mp_payload
-            if isinstance(mp_data, list) and mp_data and isinstance(mp_data[0], dict):
-                close = mp_data[0].get("close")
-                if close is not None:
-                    spot = float(close)
-                else:
-                    spot = mp
-            else:
-                spot = mp
-        except Exception:
-            spot = mp
-        if not recs or not spot or spot <= 0:
-            return None
-        from src.patterns import PIN_BAND, PIN_NEAR
-        near = [r for r in recs if abs(r["strike"] - spot) / spot <= PIN_NEAR]
-        wide = [r for r in recs if abs(r["strike"] - spot) / spot <= PIN_BAND]
-        if not near or not wide:
-            return None
-        top = max(near, key=lambda r: abs(r["gamma"]))
-        denom = sum(abs(r["gamma"]) for r in wide)
-        if denom == 0:
-            return None
-        return abs(top["gamma"]) / denom
-    except Exception:
-        return None
+            total_calls += float(tick.get("net_call_premium") or 0)
+            total_puts += float(tick.get("net_put_premium") or 0)
+        except (TypeError, ValueError):
+            continue
+    net = total_calls - total_puts
+    gross = abs(total_calls) + abs(total_puts)
+    if gross == 0:
+        return (net, None)
+    skew = abs(net) / gross
+    return (net, skew)
 
 
-@st.cache_data(ttl=HISTORICAL_TTL_S, show_spinner=False)
-def _historical_front_iv(ticker: str, date: str) -> float | None:
-    """Front-week IV (DTE ≤ 7) on a given date."""
-    try:
-        payload = uw_client.fetch_volatility(ticker, date=date)
-        term = uw_client.term_structure(payload)
-        for e in term:
-            if e["dte"] <= 7:
-                return float(e["iv"])
-        return None
-    except Exception:
-        return None
+def _extract_max_pain_distance(mp_payload: dict, spot: float | None) -> tuple[float | None, float | None]:
+    """Returns (max_pain_strike, distance_pct). distance_pct = (spot - mp) / spot * 100.
+    Positive = spot above max pain; negative = below."""
+    mp = uw_client.max_pain_value(mp_payload)
+    if mp is None or spot is None or spot <= 0:
+        return (mp, None)
+    return (mp, (spot - mp) / spot * 100)
 
 
-@st.cache_data(ttl=HISTORICAL_TTL_S, show_spinner=False)
-def _historical_term_spread_pts(ticker: str, date: str) -> float | None:
-    """Front-week IV minus 30-day IV in vol points (e.g., 5.0 = 5 pt inversion)."""
-    try:
-        payload = uw_client.fetch_volatility(ticker, date=date)
-        term = uw_client.term_structure(payload)
-        if not term:
-            return None
-        front = next((e["iv"] for e in term if e["dte"] <= 7), None)
-        monthly_entry = min(term, key=lambda e: abs(e["dte"] - 30))
-        if abs(monthly_entry["dte"] - 30) > 10:
-            return None
-        if front is None:
-            return None
-        return (front - monthly_entry["iv"]) * 100
-    except Exception:
-        return None
+# ---------- Single-date bulk extractor ----------
 
+def _all_metrics_for_date(ticker: str, date: str) -> dict[str, float | None]:
+    """Fetch all 4 endpoints for this date (cached), extract all 8 metrics in
+    one pass. Used by fetch_pinned_history."""
+    spot_exp = _hist_spot_exposures(ticker, date)
+    mp = _hist_max_pain(ticker, date)
+    vol = _hist_volatility(ticker, date)
+    npt = _hist_net_prem_ticks(ticker, date)
 
-@st.cache_data(ttl=HISTORICAL_TTL_S, show_spinner=False)
-def _historical_net_premium(ticker: str, date: str) -> float | None:
-    """End-of-day cumulative net options premium on a given date.
-    Last tick of net-prem-ticks = day's running total of (call_premium - put_premium)."""
-    try:
-        payload = uw_client.fetch_net_prem_ticks(ticker, date=date)
-        data = payload.get("data") if isinstance(payload, dict) else payload
-        if not isinstance(data, list) or not data:
-            return None
-        # Each tick has cumulative values within the day's running totals per UW docs.
-        # Strategy: sum across the day if values are per-tick deltas; otherwise the
-        # last value is the cumulative. UW returns per-minute snapshots that need
-        # summing per the doc example. So sum net_call_premium - net_put_premium.
-        net = 0.0
-        for tick in data:
-            try:
-                cp = float(tick.get("net_call_premium") or 0)
-                pp = float(tick.get("net_put_premium") or 0)
-                net += (cp - pp)
-            except (TypeError, ValueError):
-                continue
-        return net
-    except Exception:
-        return None
+    spot = _spot_from_max_pain_close(mp)
+    above, below = _extract_squeeze_sums(spot_exp, spot)
+    net_prem, skew = _extract_net_premium_and_skew(npt)
+    _mp_strike, mp_distance_pct = _extract_max_pain_distance(mp, spot)
+
+    return {
+        "concentration": _extract_concentration(spot_exp, spot),
+        "squeeze_above": above,
+        "squeeze_below": below,
+        "front_iv": _extract_front_iv(vol),
+        "term_spread_pts": _extract_term_spread_pts(vol),
+        "net_premium": net_prem,
+        "skew": skew,
+        "max_pain_distance_pct": mp_distance_pct,
+    }
 
 
 def fetch_pinned_history(ticker: str) -> dict[str, list[float]]:
-    """Concurrently fetch 7 trading days of historical metrics for one ticker.
+    """Concurrently fetch up to HISTORICAL_WINDOW_DAYS trading days of all
+    extractable metrics for one ticker.
 
-    Returns dict with keys: 'concentration', 'front_iv', 'term_spread_pts',
-    'net_premium'. Each value is a list (length ≤ 7) of historical scalars,
-    None entries removed.
+    Returns dict keyed by metric name; values are lists of historical scalars
+    (None entries removed). 4 UW endpoints × N dates fetched concurrently;
+    Streamlit caches each (endpoint, date) so retries / shared tickers reuse.
     """
     dates = _trailing_trading_dates(HISTORICAL_WINDOW_DAYS)
-    out: dict[str, list[float]] = {
-        "concentration": [],
-        "front_iv": [],
-        "term_spread_pts": [],
-        "net_premium": [],
-    }
+    metric_keys = ("concentration", "squeeze_above", "squeeze_below",
+                   "front_iv", "term_spread_pts", "net_premium",
+                   "skew", "max_pain_distance_pct")
+    out: dict[str, list[float]] = {k: [] for k in metric_keys}
 
-    def _gather_one_date(date: str) -> dict[str, float | None]:
-        return {
-            "concentration": _historical_concentration(ticker, date),
-            "front_iv": _historical_front_iv(ticker, date),
-            "term_spread_pts": _historical_term_spread_pts(ticker, date),
-            "net_premium": _historical_net_premium(ticker, date),
-        }
+    def _job(date: str) -> dict[str, float | None]:
+        return _all_metrics_for_date(ticker, date)
 
     with ThreadPoolExecutor(max_workers=HISTORICAL_MAX_CONCURRENCY) as pool:
-        for result in pool.map(_gather_one_date, dates):
+        for result in pool.map(_job, dates):
             for k, v in result.items():
                 if v is not None:
                     out[k].append(v)

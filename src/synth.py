@@ -120,17 +120,25 @@ UW DATA CONTEXT (read first — every payload field has specific provenance)
 - Source: UW `/api/stock/{ticker}/earnings` (next upcoming date, or null for ETFs / no upcoming).
 
 **30-day percentile fields (in key_numbers, when present)**
-- Format: `{{metric}}_pct_7d` = today's value's percentile (0-100) within the last ~30 trading days for THIS ticker. Computed by us, not UW. (Field name still uses the `_pct_7d` suffix for legacy reasons — the window is now 30 days; the companion `{{metric}}_7d_sample_n` tells you the actual sample size.)
-- Available metrics: `concentration_pct_7d` (gamma pin concentration), `front_iv_pct_7d` (front-week IV), `term_spread_pts_pct_7d` (front-week minus 30-day IV spread, in vol points), `net_premium_pct_7d` (daily cumulative net options premium).
-- Companion field `{{metric}}_7d_sample_n` tells you how many trading days the sample actually covered (typically 25-30; can be as low as 3 if data is sparse).
+- Format: `{{metric}}_pct_7d` = today's value's percentile (0-100) within the last ~30 trading days for THIS ticker. Computed by us, not UW. (Field-name suffix is `_pct_7d` for legacy reasons; the actual window is 30 days. Companion `{{metric}}_7d_sample_n` tells you the actual sample size.)
+- Available metrics (all share the same 4-endpoint historical fetch):
+    - `concentration_pct_7d` — gamma pin concentration (top |γ| near spot / sum |γ| in band)
+    - `squeeze_above_pct_7d` — net dealer γ summed above spot (negative = squeeze fuel up)
+    - `squeeze_below_pct_7d` — net dealer γ summed below spot (negative = squeeze fuel down)
+    - `front_iv_pct_7d` — front-week implied vol
+    - `term_spread_pts_pct_7d` — front-week IV minus 30-day IV in vol points (positive = inversion)
+    - `net_premium_pct_7d` — daily cumulative net options premium (calls $ − puts $)
+    - `skew_pct_7d` — |net flow| / total flow, 0 = balanced, 1 = 100% one side
+    - `max_pain_distance_pct_7d` — (spot − max-pain) / spot × 100; positive = spot above max-pain
+- Companion `{{metric}}_7d_sample_n` (typically 25-30; can be as low as 3 if data is sparse).
 - Calibration (30 samples ~ 3-point precision):
     - 95+ = today's value is among the HIGHEST in the past month → noteworthy / unusually heightened
     - 75-95 = elevated for this ticker (top quartile)
     - 25-75 = typical / interquartile range
     - 5-25 = quiet for this ticker (bottom quartile)
     - <5 = today's value is among the LOWEST in the past month → noteworthy / unusually quiet
-- USE THESE in your interpretation. When citing the percentile, prefer phrasing like "in the 88th percentile of the past month for this ticker" rather than the raw `_pct_7d` field name. If sample_n is low (<10), acknowledge it ("sample is shallow this period").
-- A "concentration 0.337" can be both "moderate by absolute threshold (0.30 cutoff)" AND "high relative to this ticker's typical month (95th percentile)" — those are different signals. Cite both when present.
+- USE THESE in your interpretation. When citing percentile, prefer phrasing like "today's flow skew is in the 88th percentile of the past month for this ticker" rather than the raw `_pct_7d` field name. If sample_n is low (<10), acknowledge it ("sample is shallow this period").
+- Cite the relevant percentile for EVERY scalar metric you mention. "Concentration 0.337" alone is not enough — pair it with "(98th percentile vs past 30 days)" or similar.
 
 **Contracts summary (in the payload after key_numbers, when present)**
 - Real live bid/ask/IV from UW's option-contracts endpoint for the strikes nearest the focus point.
@@ -157,6 +165,12 @@ GROUNDING RULES (hard requirements)
 - If you're tempted to add color from market intuition (e.g. "the SPY 745 strike is a key psychological level"), DON'T. Stick to what the payload shows.
 - Distinguish OBSERVATION from INFERENCE. "Spot is 745.9 with pin at 745.0" is observation. "This pin is likely to hold" is inference (allowed when grounded in the firing pattern but say WHY).
 - If a pattern's firing intensity is < 0.5, hedge your conviction language in that section ("moderate concentration" rather than "decisive pin").
+- **DEFINE EVERY TECHNICAL TERM ON FIRST USE.** Reader is familiar with options basics but new to UW-specific framings. The moment you write "intensity," "skew," "concentration," "GEX," "dark pool tick rule," "term-structure inversion," etc., follow it with a parenthetical translation in plain English. Examples:
+    - WRONG: "Skew of 0.68 suggests strong put bias."
+    - RIGHT: "Skew of 0.68 (where 0 = balanced calls vs puts and 1 = 100% one side) suggests strong put bias — 84% of premium is on puts."
+    - WRONG: "Intensity is 0.977 at the 745 pin."
+    - RIGHT: "Pinning intensity 0.977 (a 0-1 scale measuring how concentrated dealer gamma is at one strike vs. nearby strikes; 0.5 = moderate, 1.0 = saturated) at 745."
+- The reader should be able to follow your walkthrough WITHOUT knowing UW jargon beforehand. If they have to Google a term, you've failed the section.
 - **CRITICAL FORMATTING: do NOT use the `$` character for currency amounts.** Streamlit's markdown renderer treats `$` as LaTeX math-mode delimiter and will mangle your text. Use `USD` or bare numbers instead.
     - WRONG: `-$8.8M net premium`, `$5,000,000 of flow`, `target $740`
     - RIGHT: `-8.8M USD net premium`, `5,000,000 USD of flow`, `target 740`
