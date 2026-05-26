@@ -22,6 +22,35 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ---------- Page-chrome CSS ----------
+# Light polish: tighter title spacing, monospace section labels to match the
+# financial-terminal chart aesthetic, breathing room between stacked charts,
+# softer caption color. Keeps Streamlit's defaults for everything else.
+st.markdown(
+    """
+    <style>
+      /* Tighten the top padding so the title hugs the page edge */
+      .block-container { padding-top: 2rem; padding-bottom: 3rem; }
+
+      /* Section headers use the same monospace stack as the chart titles */
+      h1, h2, h3, h4, h5 {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
+        letter-spacing: -0.01em;
+      }
+
+      /* Captions a touch dimmer for better hierarchy */
+      [data-testid="stCaptionContainer"] { color: #7A85A8 !important; }
+
+      /* Breathing room around plotly charts in the pinned card */
+      .stPlotlyChart { margin-top: 0.5rem; margin-bottom: 0.25rem; }
+
+      /* Section dividers slightly softer */
+      hr { border-color: #2A2E3B !important; opacity: 0.6; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ---------- Header ----------
 st.title("Weekly Options Pre-Trade Brief")
 st.caption(
