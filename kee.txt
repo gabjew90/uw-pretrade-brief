@@ -1,5 +1,0 @@
-@"
-UW_API_KEY = "3832ae7a-66ed-4259-b40f-f613894c9b84"
-GEMINI_API_KEY = "AIzaSyDenOkkZGFE6quyvKXtnoMVkOLLk2lGniI"
-FIRECRAWL_API_KEY="fc-1d3a2da344d64c0a9c06462192f123c4"
-"@ | Out-File -Encoding utf8 .streamlit/secrets.toml

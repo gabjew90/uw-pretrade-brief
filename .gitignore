@@ -3,6 +3,12 @@
 .env
 .env.*
 !.env.example
+# Ad-hoc scratch files that might hold secrets
+kee.txt
+keys.txt
+secrets.txt
+*.secrets
+*_keys.*
 
 # Local Claude Code settings (personal allow rules, etc.)
 .claude/settings.local.json
