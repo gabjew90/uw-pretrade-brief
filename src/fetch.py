@@ -100,6 +100,192 @@ def patterns_for(td: TickerData) -> dict:
     return {k: v.to_dict() for k, v in bundle.items()}
 
 
+# ---------- 7-day percentile context for the pinned ticker ----------
+# Historical snapshots are immutable for past dates — cache them aggressively
+# (24h TTL). Current-day refresh keeps the existing 15-min UW_TTL_S.
+
+HISTORICAL_TTL_S = 86400   # 24h — past-date snapshots don't change
+HISTORICAL_WINDOW_DAYS = 7  # 7 trading days of history per pinned ticker
+HISTORICAL_LOOKBACK_CALENDAR = 12  # try last 12 calendar days to find 7 trading
+
+
+def _trailing_trading_dates(days: int = HISTORICAL_WINDOW_DAYS) -> list[str]:
+    """Return the last `days` weekday ISO dates ending YESTERDAY. We rely on
+    UW to filter holidays — calls for closed days will return empty payloads
+    and percentile will just be computed over the days that returned data."""
+    import datetime as _dt
+    out: list[str] = []
+    d = _dt.date.today() - _dt.timedelta(days=1)
+    # Walk backwards, skipping Sat/Sun
+    safety = 0
+    while len(out) < days and safety < HISTORICAL_LOOKBACK_CALENDAR + 5:
+        if d.weekday() < 5:  # Mon-Fri
+            out.append(d.isoformat())
+        d -= _dt.timedelta(days=1)
+        safety += 1
+    return out
+
+
+def _percentile_of(value: float, sample: list[float]) -> float | None:
+    """Return value's percentile (0-100) within sample. None if sample empty
+    or value is None. Uses the 'percent of items less than or equal' definition,
+    which is the standard 'percent-rank'."""
+    if value is None:
+        return None
+    clean = [s for s in sample if s is not None]
+    if not clean:
+        return None
+    le = sum(1 for s in clean if s <= value)
+    return round(100 * le / len(clean), 1)
+
+
+@st.cache_data(ttl=HISTORICAL_TTL_S, show_spinner=False)
+def _historical_concentration(ticker: str, date: str) -> float | None:
+    """For one ticker on one date: pinning concentration = top |gamma| at
+    near-spot strikes / sum |gamma| at wider band. Mirrors patterns.detect_pinning
+    but returns the raw concentration scalar so we can build a distribution."""
+    try:
+        gex_payload = uw_client.fetch_spot_exposures_strike(ticker, date=date)
+        recs = uw_client.gex_records(gex_payload)
+        # Use max-pain as spot proxy for historical (no live spot for past dates)
+        mp_payload = uw_client.fetch_max_pain(ticker, date=date)
+        mp = uw_client.max_pain_value(mp_payload)
+        # If max_pain row carries close, prefer that
+        try:
+            mp_data = mp_payload.get("data") if isinstance(mp_payload, dict) else mp_payload
+            if isinstance(mp_data, list) and mp_data and isinstance(mp_data[0], dict):
+                close = mp_data[0].get("close")
+                if close is not None:
+                    spot = float(close)
+                else:
+                    spot = mp
+            else:
+                spot = mp
+        except Exception:
+            spot = mp
+        if not recs or not spot or spot <= 0:
+            return None
+        from src.patterns import PIN_BAND, PIN_NEAR
+        near = [r for r in recs if abs(r["strike"] - spot) / spot <= PIN_NEAR]
+        wide = [r for r in recs if abs(r["strike"] - spot) / spot <= PIN_BAND]
+        if not near or not wide:
+            return None
+        top = max(near, key=lambda r: abs(r["gamma"]))
+        denom = sum(abs(r["gamma"]) for r in wide)
+        if denom == 0:
+            return None
+        return abs(top["gamma"]) / denom
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=HISTORICAL_TTL_S, show_spinner=False)
+def _historical_front_iv(ticker: str, date: str) -> float | None:
+    """Front-week IV (DTE ≤ 7) on a given date."""
+    try:
+        payload = uw_client.fetch_volatility(ticker, date=date)
+        term = uw_client.term_structure(payload)
+        for e in term:
+            if e["dte"] <= 7:
+                return float(e["iv"])
+        return None
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=HISTORICAL_TTL_S, show_spinner=False)
+def _historical_term_spread_pts(ticker: str, date: str) -> float | None:
+    """Front-week IV minus 30-day IV in vol points (e.g., 5.0 = 5 pt inversion)."""
+    try:
+        payload = uw_client.fetch_volatility(ticker, date=date)
+        term = uw_client.term_structure(payload)
+        if not term:
+            return None
+        front = next((e["iv"] for e in term if e["dte"] <= 7), None)
+        monthly_entry = min(term, key=lambda e: abs(e["dte"] - 30))
+        if abs(monthly_entry["dte"] - 30) > 10:
+            return None
+        if front is None:
+            return None
+        return (front - monthly_entry["iv"]) * 100
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=HISTORICAL_TTL_S, show_spinner=False)
+def _historical_net_premium(ticker: str, date: str) -> float | None:
+    """End-of-day cumulative net options premium on a given date.
+    Last tick of net-prem-ticks = day's running total of (call_premium - put_premium)."""
+    try:
+        payload = uw_client.fetch_net_prem_ticks(ticker, date=date)
+        data = payload.get("data") if isinstance(payload, dict) else payload
+        if not isinstance(data, list) or not data:
+            return None
+        # Each tick has cumulative values within the day's running totals per UW docs.
+        # Strategy: sum across the day if values are per-tick deltas; otherwise the
+        # last value is the cumulative. UW returns per-minute snapshots that need
+        # summing per the doc example. So sum net_call_premium - net_put_premium.
+        net = 0.0
+        for tick in data:
+            try:
+                cp = float(tick.get("net_call_premium") or 0)
+                pp = float(tick.get("net_put_premium") or 0)
+                net += (cp - pp)
+            except (TypeError, ValueError):
+                continue
+        return net
+    except Exception:
+        return None
+
+
+def fetch_pinned_history(ticker: str) -> dict[str, list[float]]:
+    """Concurrently fetch 7 trading days of historical metrics for one ticker.
+
+    Returns dict with keys: 'concentration', 'front_iv', 'term_spread_pts',
+    'net_premium'. Each value is a list (length ≤ 7) of historical scalars,
+    None entries removed.
+    """
+    dates = _trailing_trading_dates(HISTORICAL_WINDOW_DAYS)
+    out: dict[str, list[float]] = {
+        "concentration": [],
+        "front_iv": [],
+        "term_spread_pts": [],
+        "net_premium": [],
+    }
+
+    def _gather_one_date(date: str) -> dict[str, float | None]:
+        return {
+            "concentration": _historical_concentration(ticker, date),
+            "front_iv": _historical_front_iv(ticker, date),
+            "term_spread_pts": _historical_term_spread_pts(ticker, date),
+            "net_premium": _historical_net_premium(ticker, date),
+        }
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for result in pool.map(_gather_one_date, dates):
+            for k, v in result.items():
+                if v is not None:
+                    out[k].append(v)
+    return out
+
+
+def percentile_context(ticker: str, today_values: dict) -> dict[str, float]:
+    """For each metric in `today_values` that has 7-day history, return its
+    percentile (0-100). Returns dict like {'concentration_pct_7d': 75.0, ...}.
+    Missing/insufficient-history metrics are omitted from the output."""
+    history = fetch_pinned_history(ticker)
+    out: dict[str, float] = {}
+    for metric, sample in history.items():
+        if len(sample) < 3:  # need at least 3 days for percentile to be meaningful
+            continue
+        today = today_values.get(metric)
+        pct = _percentile_of(today, sample)
+        if pct is not None:
+            out[f"{metric}_pct_7d"] = pct
+            out[f"{metric}_7d_sample_n"] = len(sample)
+    return out
+
+
 @st.cache_data(ttl=UW_TTL_S, show_spinner=False)
 def fetch_one_contracts(ticker: str) -> list[dict]:
     """Lazy: only fetched when a ticker is pinned. ~300 contracts per ticker

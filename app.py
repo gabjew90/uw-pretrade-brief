@@ -169,6 +169,24 @@ if pinned:
         "next_earnings": pinned_td.next_earnings,
     }
     pinned_kn = {k: v for k, v in pinned_kn.items() if v is not None}
+
+    # 7-day percentile context for the pinned ticker. Computes today's value
+    # vs the last 7 trading days for each metric where we have history. Lets
+    # the synth interpret "is this reading typical or unusual for this ticker?"
+    try:
+        today_metrics = {
+            "concentration": pinned_patterns.get("pinning", {}).get("note", {}).get("concentration"),
+            "front_iv": (pinned_td.term[0]["iv"] if pinned_td.term else None),
+            "term_spread_pts": pinned_patterns.get("vol_regime", {}).get("note", {}).get("front_minus_30d_pts"),
+            "net_premium": pinned_patterns.get("flow", {}).get("note", {}).get("net_premium_usd"),
+        }
+        with st.spinner(f"Computing 7-day percentile context for {pinned}…"):
+            pct_ctx = fetch.percentile_context(pinned, today_metrics)
+        pinned_kn.update(pct_ctx)
+    except Exception as _pct_err:
+        import sys as _sys
+        print(f"[percentile] {pinned} skipped ({type(_pct_err).__name__}: {_pct_err})",
+              file=_sys.stderr)
     # Build a compact contracts summary string for the pinned-synth prompt.
     # Lets the AI reference real strikes/bids/asks that match what the user
     # will see in the picker table below.

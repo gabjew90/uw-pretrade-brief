@@ -63,16 +63,20 @@ def _get(path: str, params: dict | None = None) -> Any:
 
 # ---------- Endpoint methods ----------
 
-def fetch_spot_exposures_strike(ticker: str) -> dict:
+def fetch_spot_exposures_strike(ticker: str, date: str | None = None) -> dict:
     """Per-strike Spot GEX — dealer-positioning gamma per strike. Drives
     pinning + gamma squeeze detection. Returns directional fields
-    (call_gamma_oi, put_gamma_oi, *_ask, *_bid)."""
-    return _get(f"/api/stock/{ticker}/spot-exposures/strike")
+    (call_gamma_oi, put_gamma_oi, *_ask, *_bid).
+
+    `date` (ISO YYYY-MM-DD): historical snapshot if provided; latest otherwise."""
+    params = {"date": date} if date else None
+    return _get(f"/api/stock/{ticker}/spot-exposures/strike", params=params)
 
 
-def fetch_oi_strike(ticker: str) -> dict:
+def fetch_oi_strike(ticker: str, date: str | None = None) -> dict:
     """Per-strike open interest, calls + puts split."""
-    return _get(f"/api/stock/{ticker}/oi-per-strike")
+    params = {"date": date} if date else None
+    return _get(f"/api/stock/{ticker}/oi-per-strike", params=params)
 
 
 def fetch_flow_alerts(ticker: str | None = None, limit: int = 50) -> dict:
@@ -85,14 +89,24 @@ def fetch_flow_alerts(ticker: str | None = None, limit: int = 50) -> dict:
     return _get("/api/option-trades/flow-alerts", params=params)
 
 
-def fetch_volatility(ticker: str) -> dict:
+def fetch_volatility(ticker: str, date: str | None = None) -> dict:
     """IV term structure for the ticker (avg ATM call+put IV per expiry)."""
-    return _get(f"/api/stock/{ticker}/volatility/term-structure")
+    params = {"date": date} if date else None
+    return _get(f"/api/stock/{ticker}/volatility/term-structure", params=params)
 
 
-def fetch_max_pain(ticker: str) -> dict:
+def fetch_max_pain(ticker: str, date: str | None = None) -> dict:
     """Max pain across expirations for the ticker."""
-    return _get(f"/api/stock/{ticker}/max-pain")
+    params = {"date": date} if date else None
+    return _get(f"/api/stock/{ticker}/max-pain", params=params)
+
+
+def fetch_net_prem_ticks(ticker: str, date: str | None = None) -> dict:
+    """Minute-by-minute net premium ticks for the ticker on a given day.
+    Daily totals = the last tick (cumulative). Used for historical net-premium
+    percentile context."""
+    params = {"date": date} if date else None
+    return _get(f"/api/stock/{ticker}/net-prem-ticks", params=params)
 
 
 def fetch_darkpool(ticker: str, limit: int = 50) -> dict:
@@ -107,11 +121,12 @@ def fetch_earnings(ticker: str) -> dict:
     return _get(f"/api/stock/{ticker}/earnings")
 
 
-def fetch_interpolated_iv(ticker: str) -> dict:
+def fetch_interpolated_iv(ticker: str, date: str | None = None) -> dict:
     """Interpolated IV with percentile/rank data. The source for IV rank
     when it's needed in key_numbers (volatility/term-structure doesn't
     include IV rank)."""
-    return _get(f"/api/stock/{ticker}/interpolated-iv")
+    params = {"date": date} if date else None
+    return _get(f"/api/stock/{ticker}/interpolated-iv", params=params)
 
 
 def fetch_option_contracts(ticker: str, limit: int = 500) -> dict:

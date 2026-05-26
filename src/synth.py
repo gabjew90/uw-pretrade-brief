@@ -119,6 +119,18 @@ UW DATA CONTEXT (read first — every payload field has specific provenance)
 **next_earnings (in key_numbers, when present)**
 - Source: UW `/api/stock/{ticker}/earnings` (next upcoming date, or null for ETFs / no upcoming).
 
+**7-day percentile fields (in key_numbers, when present)**
+- Format: `{{metric}}_pct_7d` = today's value's percentile (0-100) within the last 7 trading days for THIS ticker. Computed by us, not UW.
+- Available metrics: `concentration_pct_7d` (gamma pin concentration), `front_iv_pct_7d` (front-week IV), `term_spread_pts_pct_7d` (front-week minus 30-day IV spread, in vol points), `net_premium_pct_7d` (daily cumulative net options premium).
+- Companion field `{{metric}}_7d_sample_n` tells you how many trading days the sample covered (≥3, ≤7).
+- Calibration:
+    - 90+ = today's value is among the HIGHEST in the past week → noteworthy / heightened
+    - 70-90 = elevated for this ticker
+    - 30-70 = typical / median range
+    - 10-30 = quiet for this ticker
+    - <10 = today's value is among the LOWEST in the past week → noteworthy / unusually quiet
+- USE THESE in your interpretation. A "concentration 0.337" can be either "moderate by absolute threshold (0.30 cutoff)" AND "high relative to this ticker's typical week (95th percentile)" — those are different signals. Cite the percentile when present.
+
 **Contracts summary (in the payload after key_numbers, when present)**
 - Real live bid/ask/IV from UW's option-contracts endpoint for the strikes nearest the focus point.
 - The user sees these EXACT numbers in the contracts table below your output.
