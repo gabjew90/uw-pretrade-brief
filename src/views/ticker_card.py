@@ -112,6 +112,22 @@ def render(ticker: str, td: "fetch.TickerData", synthesis: str, patterns: dict):
             meta.append(f"Earnings **{td.next_earnings[:10]}**")
         if meta:
             st.caption(" · ".join(meta))
+        # Transparency: surface percentile-context status so the user can tell
+        # whether the synth has 30-day relative-quantification data to draw on.
+        pct_ctx = st.session_state.get(f"_pct_ctx_{ticker}")
+        if pct_ctx is not None:
+            if "_error" in pct_ctx:
+                st.caption(f"📊 30-day percentile context: failed ({pct_ctx['_error']})")
+            elif pct_ctx:
+                # Each metric contributes two entries (_pct_7d + _7d_sample_n),
+                # so divide by 2 to count metrics. Sample size taken from the
+                # first metric is representative (all share the same fetch).
+                n_metrics = sum(1 for k in pct_ctx if k.endswith("_pct_7d"))
+                first_n = next((v for k, v in pct_ctx.items() if k.endswith("_sample_n")), None)
+                n_note = f", n={int(first_n)}" if first_n else ""
+                st.caption(f"📊 30-day percentile context: {n_metrics} metrics loaded{n_note}")
+            else:
+                st.caption("📊 30-day percentile context: no history available (insufficient samples)")
     with close_col:
         if st.button("✕", key="unpin", help="Unpin"):
             st.session_state.pinned_ticker = None

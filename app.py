@@ -227,10 +227,14 @@ if pinned:
                         f"(first load ~30s; cached after)…"):
             pct_ctx = fetch.percentile_context(pinned, today_metrics)
         pinned_kn.update(pct_ctx)
+        # Stash for the transparency caption below the meta strip so we can
+        # see at a glance whether percentile context loaded on this deploy.
+        st.session_state[f"_pct_ctx_{pinned}"] = pct_ctx
     except Exception as _pct_err:
         import sys as _sys
         print(f"[percentile] {pinned} skipped ({type(_pct_err).__name__}: {_pct_err})",
               file=_sys.stderr)
+        st.session_state[f"_pct_ctx_{pinned}"] = {"_error": str(_pct_err)}
     # Build a compact contracts summary string for the pinned-synth prompt.
     # Lets the AI reference real strikes/bids/asks that match what the user
     # will see in the picker table below.
