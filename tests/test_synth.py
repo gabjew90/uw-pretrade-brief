@@ -193,15 +193,15 @@ def test_summarize_falls_back_on_gemini_exception(monkeypatch):
 
 # ---------- PINNED-CARD synthesis (long, with recommendations) ----------
 
-def test_pinned_prompt_contains_section_directives_and_disclaimer_note():
+def test_pinned_prompt_contains_section_directives_and_no_hedge_rule():
     p = build_pinned_prompt("NVDA", SAMPLE_PATTERNS, SAMPLE_KEY_NUMBERS)
     assert "NVDA" in p
     # All four section headers in the instructions
     for section in ("What the gamma chart shows", "What the OI",
                     "What the vol regime shows", "Best contracts for the week"):
         assert section in p
-    # Prompt should explicitly tell model the disclaimer is already shown
-    assert "disclaimer" in p.lower()
+    # Prompt should tell the model not to add boilerplate hedges
+    assert "do not hedge" in p.lower() or "don't hedge" in p.lower()
 
 
 def test_pinned_prompt_includes_contracts_summary_when_provided():
@@ -396,3 +396,66 @@ def test_summarize_pinned_falls_back_on_gemini_exception(monkeypatch):
     out = summarize_pinned("NVDA", SAMPLE_PATTERNS, SAMPLE_KEY_NUMBERS)
     # Fallback used
     assert "What the gamma chart shows" in out
+
+
+# ---------- Pinned-synthesis section splitter (view-layer concern) ----------
+
+from src.views.ticker_card import _split_pinned_synthesis
+
+
+def test_split_pinned_synthesis_full_text():
+    text = """**What the gamma chart shows**
+Gamma is heavily concentrated at 450.
+
+**What the OI + flow data shows**
+Net flow long 2M USD.
+
+**What the vol regime shows**
+Normal term structure.
+
+**Best contracts for the week**
+- 450 call front-week."""
+    sections = _split_pinned_synthesis(text)
+    assert "Gamma is heavily" in sections["gamma"]
+    assert "Net flow long" in sections["oi_flow"]
+    assert "Normal term" in sections["vol"]
+    assert "450 call front-week" in sections["trades"]
+
+
+def test_split_pinned_synthesis_empty():
+    sections = _split_pinned_synthesis("")
+    assert sections == {"gamma": "", "oi_flow": "", "vol": "", "trades": ""}
+
+
+def test_split_pinned_synthesis_no_headers_falls_back_to_trades():
+    """If no recognized headers found, dump whole text in trades so user
+    still sees something rather than nothing."""
+    text = "Random text with no section headers at all."
+    sections = _split_pinned_synthesis(text)
+    assert sections["trades"] == text
+    assert sections["gamma"] == ""
+
+
+def test_split_pinned_synthesis_missing_section():
+    """If only some sections present, the others stay empty."""
+    text = """**What the gamma chart shows**
+Just gamma talk.
+
+**Best contracts for the week**
+- one trade."""
+    sections = _split_pinned_synthesis(text)
+    assert "Just gamma talk" in sections["gamma"]
+    assert "one trade" in sections["trades"]
+    assert sections["oi_flow"] == ""
+    assert sections["vol"] == ""
+
+
+def test_split_pinned_synthesis_case_insensitive_and_whitespace_tolerant():
+    text = """** what the gamma chart shows **
+Content A.
+
+**What the OI + Flow Data Shows**
+Content B."""
+    sections = _split_pinned_synthesis(text)
+    assert "Content A" in sections["gamma"]
+    assert "Content B" in sections["oi_flow"]

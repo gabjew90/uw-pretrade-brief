@@ -21,8 +21,8 @@ MAX_OUTPUT_TOKENS = 120          # scan-row synthesis (tight)
 MAX_OUTPUT_TOKENS_PINNED = 1400  # pinned-card synthesis (multi-paragraph + 3-4 trades w/ Entry/Exit/Why)
 
 # Used by SCAN-ROW synthesis only. The pinned synthesis is allowed to use
-# recommendation language because the user explicitly opted in with the
-# top-of-app NOT-INVESTMENT-ADVICE disclaimer accepting the legal exposure.
+# recommendation language because the operator explicitly opted into that
+# framing (see MEMORY.md).
 FORBIDDEN_RE = re.compile(
     r"\b(buy|sell|short|long the|enter|exit|recommend|should|suggest|"
     r"consider taking|strong\s+(?:buy|sell)|high probability|likely to|"
@@ -70,8 +70,7 @@ def build_prompt(ticker: str, patterns: dict, key_numbers: dict) -> str:
 # is familiar with options basics (calls, puts, strikes, IV, DTE) but NEW to
 # UW-specific framings (Spot GEX, dealer hedging, dark pool tick rule,
 # IV term-structure inversion). Output is multi-paragraph and DOES name
-# specific trades — the app carries a top-of-page NOT-INVESTMENT-ADVICE
-# disclaimer and the operator explicitly accepted that legal framing.
+# specific trades — operator-accepted framing (see MEMORY.md).
 
 PINNED_INSTRUCTION = """You are writing an educational walkthrough for an options trader who knows the basics (calls, puts, strikes, IV, DTE) but is NEW to Unusual Whales' specific data framings (Spot GEX, dealer gamma hedging, dark pool tick rule, IV term-structure inversion).
 
@@ -208,7 +207,7 @@ STRICT REQUIREMENTS:
 - Each trade idea MUST have the three sub-bullets (Entry / Exit / Why). Output is rejected if Entry/Exit markers are missing.
 - The user sees a contract picker table below your output showing real bid/ask for the strikes you mention. Be consistent with what they'll see in that table.
 
-Do not hedge with "this is not financial advice" or "consult a professional" — the dashboard has a prominent disclaimer at the top of the page covering that. Just write the analysis.
+Do not hedge with "this is not financial advice" or "consult a professional" boilerplate. Just write the analysis.
 """
 
 

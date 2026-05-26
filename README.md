@@ -2,10 +2,6 @@
 
 A Streamlit dashboard that scans a watchlist of 10–30 tickers, shows which structural options-trade pattern is firing on each, and uses Gemini to walk the reader through what the data means and which contracts fit the setup for the week. Data from Unusual Whales (dealer positioning, dark pool prints, flow, volatility).
 
-> ## ⚠️ NOT INVESTMENT ADVICE
->
-> The AI-generated trade ideas are derived from structural options data and represent one reading of the patterns. They are **NOT recommendations** to buy, sell, or hold any security. Options trading involves substantial risk of loss including loss of principal. Past patterns do not predict future outcomes. You are solely responsible for your own trading decisions. Consult a licensed financial advisor before making any trade. By using this tool you accept this disclaimer.
-
 **Open source** — MIT licensed. Each user runs it with their own Unusual Whales API key (see [Self-host](#self-host) below).
 
 **Live demo:** https://uw-pretrade-brief.streamlit.app (operator's personal-use deployment; please don't load-test it)

@@ -22,22 +22,10 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ---------- Disclaimer (always visible, can't be dismissed) ----------
-st.error(
-    "⚠️ **NOT INVESTMENT ADVICE.** The AI-generated trade ideas on this dashboard are "
-    "derived from structural options data (dealer positioning, flow, volatility) and "
-    "represent one reading of the patterns. They are NOT recommendations to buy, sell, "
-    "or hold any security. Options trading involves substantial risk of loss including "
-    "loss of principal. Past patterns do not predict future outcomes. You are solely "
-    "responsible for your own trading decisions. Consult a licensed financial advisor "
-    "before making any trade."
-)
-
 # ---------- Header ----------
 st.title("Weekly Options Pre-Trade Brief")
 st.caption(
-    "AI-assisted reading of Unusual Whales options-positioning data. "
-    "Not financial advice. Trade at your own risk."
+    "AI-assisted reading of Unusual Whales options-positioning data."
 )
 
 # ---------- Sidebar ----------

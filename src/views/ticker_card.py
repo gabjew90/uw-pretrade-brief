@@ -35,31 +35,71 @@ def render_empty():
     st.info("Tap a row below to see detailed analysis.")
 
 
+import re as _re
+
+
 def _escape_dollars_for_markdown(text: str) -> str:
     """Streamlit's markdown renderer treats `$...$` as LaTeX math mode.
     The synthesis prompt forbids `$` for currency, but escape any that
     slip through as a defensive backstop so the output never mangles."""
     # Replace bare $ with the escaped form \$ which renders as a literal $
     # Only escape $ that aren't already escaped.
-    import re as _re
     return _re.sub(r'(?<!\\)\$', r'\\$', text)
+
+
+# Section headers the pinned synthesis is required to produce (see prompt
+# in src/synth.py + fallback_pinned_summary). We split the synthesis into
+# these four chunks so each can render inline with its corresponding chart.
+_PINNED_SECTION_PATTERNS = [
+    (_re.compile(r"\*\*\s*What the gamma chart shows\s*\*\*", _re.IGNORECASE), "gamma"),
+    (_re.compile(r"\*\*\s*What the OI[^*]*?\*\*", _re.IGNORECASE), "oi_flow"),
+    (_re.compile(r"\*\*\s*What the vol regime shows\s*\*\*", _re.IGNORECASE), "vol"),
+    (_re.compile(r"\*\*\s*Best contracts for the week\s*\*\*", _re.IGNORECASE), "trades"),
+]
+
+
+def _split_pinned_synthesis(text: str) -> dict[str, str]:
+    """Split the 4-section pinned synthesis into per-section content.
+
+    Returns dict with keys: gamma, oi_flow, vol, trades. Missing sections
+    are empty strings. If NO recognized headers are found (parser fail),
+    the entire text falls into the 'trades' bucket so the user still sees
+    the content rather than nothing."""
+    sections = {"gamma": "", "oi_flow": "", "vol": "", "trades": ""}
+    if not text:
+        return sections
+
+    matches: list[tuple[int, int, str]] = []
+    for pattern, key in _PINNED_SECTION_PATTERNS:
+        m = pattern.search(text)
+        if m:
+            matches.append((m.start(), m.end(), key))
+    matches.sort()
+
+    if not matches:
+        sections["trades"] = text
+        return sections
+
+    for i, (_start, end, key) in enumerate(matches):
+        next_start = matches[i + 1][0] if i + 1 < len(matches) else len(text)
+        sections[key] = text[end:next_start].strip()
+    return sections
 
 
 def render(ticker: str, td: "fetch.TickerData", synthesis: str, patterns: dict):
     """Render the pinned card for a ticker.
 
+    Layout: each chart is followed immediately by the synthesis section
+    that explains it (gamma chart → gamma walkthrough, OI chart → OI
+    walkthrough, vol chart → vol walkthrough), so the explanation lives
+    with the visual it's explaining. The 'Best contracts for the week'
+    trade-ideas section is the conclusion at the bottom.
+
     `synthesis` here is the LONG pinned-card walkthrough (4-section markdown
-    with trade ideas), not the short scan-row headline. Caller responsible
-    for passing the right one (see app.py)."""
+    with trade ideas), not the short scan-row headline."""
     head_col, close_col = st.columns([10, 1])
     with head_col:
         st.markdown(f"### {ticker}")
-        # Render the multi-paragraph markdown directly (no italics wrap; the
-        # walkthrough has its own structure with bold section headers).
-        # Dollar-escape is defensive — the prompt already tells Gemini to
-        # avoid `$` for currency, but this prevents math-mode renders if
-        # something slips through.
-        st.markdown(_escape_dollars_for_markdown(synthesis))
         # Context strip: spot · IV rank · earnings · max pain
         meta = []
         if td.spot:
@@ -87,20 +127,42 @@ def render(ticker: str, td: "fetch.TickerData", synthesis: str, patterns: dict):
             st.rerun()
         return
 
-    # Three charts stacked vertically — same layout on desktop and mobile per spec §4.5
+    # Split the synthesis into per-section content so each chart can be
+    # followed by the section that explains it.
+    sections = _split_pinned_synthesis(synthesis)
+
+    def _render_section(key: str, header: str):
+        """Render one synthesis section under its chart, if Gemini produced one."""
+        content = sections.get(key, "").strip()
+        if content:
+            st.markdown(
+                _escape_dollars_for_markdown(f"**{header}**\n\n{content}")
+            )
+
+    # Gamma chart + walkthrough
     st.plotly_chart(
         charts.gamma_profile_figure(td.gex_recs, spot=td.spot or 0, ticker=ticker),
         width="stretch",
     )
+    _render_section("gamma", "What the gamma chart shows")
+
+    # OI chart + walkthrough
     st.plotly_chart(
         charts.oi_per_strike_figure(td.oi_recs, spot=td.spot or 0,
                                     max_pain=td.max_pain, ticker=ticker),
         width="stretch",
     )
+    _render_section("oi_flow", "What the OI + flow data shows")
+
+    # Vol chart + walkthrough
     st.plotly_chart(
         charts.vol_term_structure_figure(td.term, ticker=ticker),
         width="stretch",
     )
+    _render_section("vol", "What the vol regime shows")
+
+    # Trade-ideas section — conclusion, lives at the bottom above the picker
+    _render_section("trades", "Best contracts for the week")
 
     _render_contract_picker(ticker, td, patterns)
 

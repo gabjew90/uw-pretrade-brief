@@ -31,6 +31,20 @@ Read at session start. Never contradict a logged decision without flagging it fi
 **Rejected:** API Advanced ($375/mo, 90-day lookback) — would relax the 30-day data window but isn't justified for a Sunday demo. Startup tier ($625/mo) — would unlock commercial use + redistribution but the operator's framing is personal-use decision-support.
 **Knock-on:** CLAUDE.md updated. README license disclaimer still correct as written.
 
+## 2026-05-26 — Investment disclaimer removed (recommendation framing retained)
+
+**Decided:** Removed the top-of-app "⚠️ NOT INVESTMENT ADVICE" banner and the corresponding README disclaimer block. The pinned-card synthesis still names specific contracts as recommendations (that framing wasn't changed). The synth prompt's reference to the disclaimer ("the dashboard has a prominent disclaimer at the top of the page covering that") was reworded to just "don't hedge with boilerplate."
+**Why:** Operator request after seeing the live UX. The recommendation framing alone is the legal-exposure surface; the disclaimer banner was the mitigation but the operator chose to drop it.
+**Rejected:** Keeping the disclaimer (operator override). Replacing recommendations with structural-fit-only language (separate question; operator wants to keep recommendation framing).
+**Trade-off to note for future-me:** The legal exposure surface for the project is now larger than the 2026-05-25 design contemplated. The recommendation language is still there; the mitigation isn't. If this gets shared widely, revisit.
+
+## 2026-05-26 — Pinned card layout: synthesis inlined under each chart
+
+**Decided:** Each pinned-card chart is now followed immediately by its synthesis section (gamma chart → "What the gamma chart shows", OI chart → "What the OI + flow data shows", IV chart → "What the vol regime shows"). The "Best contracts for the week" trade-ideas section is the conclusion at the bottom, above the contracts picker table.
+**Why:** Operator request. Previous layout had all four synthesis sections at the top of the pinned card BEFORE the charts, forcing the reader to scroll between explanation and visual. Inlining puts the explanation with the visual it's explaining.
+**Implementation:** `_split_pinned_synthesis()` helper in ticker_card.py parses the 4-section markdown into a dict. Render now interleaves chart + section instead of dumping all synthesis up front. Falls back to "all content goes in trades section" if parser finds no headers.
+**Rejected:** Restructuring the Gemini prompt to return JSON with 4 fields directly — would require validator + cache + tests overhaul; parsing the existing markdown is cheaper and equally robust.
+
 ## 2026-05-25 — Two-tier synthesis: scan-row observational, pinned-card prescriptive
 
 **Decided:** Synthesis is now TWO functions with different prompts and validators:
