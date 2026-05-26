@@ -422,9 +422,23 @@ def validate_pinned_output(text: str, must_contain_numbers: list[float],
     return True, ""
 
 
+def _pct_line(kn: dict, metric: str, label: str) -> str:
+    """Format a one-sentence percentile-context line, or empty string if the
+    metric has no recorded history this session. Reads `{metric}_pct_7d` +
+    `{metric}_7d_sample_n` from key_numbers (the suffix is `_7d` for legacy
+    reasons; the window is actually 30 trading days)."""
+    pct = kn.get(f"{metric}_pct_7d")
+    n = kn.get(f"{metric}_7d_sample_n")
+    if pct is None:
+        return ""
+    n_note = f", n={int(n)}" if n else ""
+    return f" Today's {label} sits in the **{pct:.0f}th percentile** vs the past 30 trading days for this ticker{n_note}."
+
+
 def fallback_pinned_summary(ticker: str, patterns: dict, key_numbers: dict) -> str:
     """Deterministic fallback for the pinned card when Gemini fails or its
-    output is rejected. Same four-section format, no AI."""
+    output is rejected. Same four-section format, no AI. Includes 30-day
+    percentile context for every metric where history is available."""
     p = patterns or {}
     kn = key_numbers or {}
     spot = kn.get("spot")
@@ -450,6 +464,10 @@ def fallback_pinned_summary(ticker: str, patterns: dict, key_numbers: dict) -> s
     else:
         gamma_msg = (f"No high-concentration gamma feature near spot {spot_str}. "
                      f"Dealer hedging pressure is balanced; expect mean-reverting behavior.")
+    # 30-day percentile context for the gamma-side metrics
+    gamma_msg += _pct_line(kn, "concentration", "pin concentration")
+    gamma_msg += _pct_line(kn, "squeeze_above", "net γ above spot")
+    gamma_msg += _pct_line(kn, "squeeze_below", "net γ below spot")
 
     # Flow section
     flow = p.get("flow", {})
@@ -462,6 +480,9 @@ def fallback_pinned_summary(ticker: str, patterns: dict, key_numbers: dict) -> s
                     f"desk corroborates the options crowd; divergent means they disagree.")
     else:
         flow_msg = "Options flow is neutral — no large directional premium imbalance today."
+    flow_msg += _pct_line(kn, "net_premium", "net premium")
+    flow_msg += _pct_line(kn, "skew", "flow skew (0 = balanced, 1 = one-sided)")
+    flow_msg += _pct_line(kn, "max_pain_distance_pct", "max-pain distance")
 
     # Vol section
     vol = p.get("vol_regime", {})
@@ -471,6 +492,8 @@ def fallback_pinned_summary(ticker: str, patterns: dict, key_numbers: dict) -> s
                    f"is pricing an event-driven near-term catalyst (earnings, FOMC, news).")
     else:
         vol_msg = f"Vol term structure is normal. IV rank {iv_rank if iv_rank else '?'}."
+    vol_msg += _pct_line(kn, "front_iv", "front-week IV")
+    vol_msg += _pct_line(kn, "term_spread_pts", "term-structure spread (front − 30d)")
 
     # Trade ideas section — straight from the firing patterns, with Entry/Exit
     # framework so the trader knows WHEN to act, not just WHAT to trade.
