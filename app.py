@@ -203,13 +203,25 @@ if pinned:
     except Exception:
         contracts_for_prompt = None
 
-    pinned_synth = fetch.synthesize_pinned(
-        pinned,
-        fetch._patterns_hash(pinned_patterns, pinned_kn),
-        pinned_patterns,
-        pinned_kn,
-        contracts_summary=contracts_for_prompt,
-    )
+    try:
+        pinned_synth = fetch.synthesize_pinned(
+            pinned,
+            fetch._patterns_hash(pinned_patterns, pinned_kn),
+            pinned_patterns,
+            pinned_kn,
+            contracts_summary=contracts_for_prompt,
+        )
+    except Exception as _pinned_err:
+        # Temporary diagnostic exposure — Streamlit Cloud redacts exceptions in
+        # production by default. Surfacing the real cause here so we can fix it.
+        import traceback as _tb
+        st.warning(
+            f"**Pinned synth error (diagnostic):** `{type(_pinned_err).__name__}: {_pinned_err}`"
+        )
+        with st.expander("Full traceback"):
+            st.code(_tb.format_exc())
+        from src.synth import fallback_pinned_summary as _fb
+        pinned_synth = _fb(pinned, pinned_patterns, pinned_kn)
     ticker_card.render(pinned, pinned_td, pinned_synth, pinned_patterns)
 else:
     ticker_card.render_empty()
