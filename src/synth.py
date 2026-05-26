@@ -119,17 +119,18 @@ UW DATA CONTEXT (read first — every payload field has specific provenance)
 **next_earnings (in key_numbers, when present)**
 - Source: UW `/api/stock/{ticker}/earnings` (next upcoming date, or null for ETFs / no upcoming).
 
-**7-day percentile fields (in key_numbers, when present)**
-- Format: `{{metric}}_pct_7d` = today's value's percentile (0-100) within the last 7 trading days for THIS ticker. Computed by us, not UW.
+**30-day percentile fields (in key_numbers, when present)**
+- Format: `{{metric}}_pct_7d` = today's value's percentile (0-100) within the last ~30 trading days for THIS ticker. Computed by us, not UW. (Field name still uses the `_pct_7d` suffix for legacy reasons — the window is now 30 days; the companion `{{metric}}_7d_sample_n` tells you the actual sample size.)
 - Available metrics: `concentration_pct_7d` (gamma pin concentration), `front_iv_pct_7d` (front-week IV), `term_spread_pts_pct_7d` (front-week minus 30-day IV spread, in vol points), `net_premium_pct_7d` (daily cumulative net options premium).
-- Companion field `{{metric}}_7d_sample_n` tells you how many trading days the sample covered (≥3, ≤7).
-- Calibration:
-    - 90+ = today's value is among the HIGHEST in the past week → noteworthy / heightened
-    - 70-90 = elevated for this ticker
-    - 30-70 = typical / median range
-    - 10-30 = quiet for this ticker
-    - <10 = today's value is among the LOWEST in the past week → noteworthy / unusually quiet
-- USE THESE in your interpretation. A "concentration 0.337" can be either "moderate by absolute threshold (0.30 cutoff)" AND "high relative to this ticker's typical week (95th percentile)" — those are different signals. Cite the percentile when present.
+- Companion field `{{metric}}_7d_sample_n` tells you how many trading days the sample actually covered (typically 25-30; can be as low as 3 if data is sparse).
+- Calibration (30 samples ~ 3-point precision):
+    - 95+ = today's value is among the HIGHEST in the past month → noteworthy / unusually heightened
+    - 75-95 = elevated for this ticker (top quartile)
+    - 25-75 = typical / interquartile range
+    - 5-25 = quiet for this ticker (bottom quartile)
+    - <5 = today's value is among the LOWEST in the past month → noteworthy / unusually quiet
+- USE THESE in your interpretation. When citing the percentile, prefer phrasing like "in the 88th percentile of the past month for this ticker" rather than the raw `_pct_7d` field name. If sample_n is low (<10), acknowledge it ("sample is shallow this period").
+- A "concentration 0.337" can be both "moderate by absolute threshold (0.30 cutoff)" AND "high relative to this ticker's typical month (95th percentile)" — those are different signals. Cite both when present.
 
 **Contracts summary (in the payload after key_numbers, when present)**
 - Real live bid/ask/IV from UW's option-contracts endpoint for the strikes nearest the focus point.

@@ -105,8 +105,13 @@ def patterns_for(td: TickerData) -> dict:
 # (24h TTL). Current-day refresh keeps the existing 15-min UW_TTL_S.
 
 HISTORICAL_TTL_S = 86400   # 24h — past-date snapshots don't change
-HISTORICAL_WINDOW_DAYS = 7  # 7 trading days of history per pinned ticker
-HISTORICAL_LOOKBACK_CALENDAR = 12  # try last 12 calendar days to find 7 trading
+HISTORICAL_WINDOW_DAYS = 30  # 30 trading days of history per pinned ticker (UW Basic ceiling)
+HISTORICAL_LOOKBACK_CALENDAR = 50  # try last 50 calendar days to find 30 trading
+                                   # (accounts for weekends + occasional holidays)
+HISTORICAL_MAX_CONCURRENCY = 3     # threadpool workers for historical fetch — gentler
+                                   # than the live-batch concurrency (8) so we don't
+                                   # trip UW Basic's 120 req/min burst limit when a
+                                   # cold-cache pin fires 120 calls (30 days × 4 metrics)
 
 
 def _trailing_trading_dates(days: int = HISTORICAL_WINDOW_DAYS) -> list[str]:
@@ -261,7 +266,7 @@ def fetch_pinned_history(ticker: str) -> dict[str, list[float]]:
             "net_premium": _historical_net_premium(ticker, date),
         }
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=HISTORICAL_MAX_CONCURRENCY) as pool:
         for result in pool.map(_gather_one_date, dates):
             for k, v in result.items():
                 if v is not None:

@@ -180,7 +180,8 @@ if pinned:
             "term_spread_pts": pinned_patterns.get("vol_regime", {}).get("note", {}).get("front_minus_30d_pts"),
             "net_premium": pinned_patterns.get("flow", {}).get("note", {}).get("net_premium_usd"),
         }
-        with st.spinner(f"Computing 7-day percentile context for {pinned}…"):
+        with st.spinner(f"Computing 30-day percentile context for {pinned} "
+                        f"(first load ~30s; cached after)…"):
             pct_ctx = fetch.percentile_context(pinned, today_metrics)
         pinned_kn.update(pct_ctx)
     except Exception as _pct_err:

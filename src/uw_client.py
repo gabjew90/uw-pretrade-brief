@@ -43,22 +43,36 @@ def _get_key() -> str:
     return key
 
 
+_429_RETRY_DELAYS_S = (1, 2, 4)  # exponential backoff: 1s, 2s, 4s, then give up
+
+
 def _get(path: str, params: dict | None = None) -> Any:
+    """GET wrapper with retry-on-429 (exponential backoff) so heavy concurrent
+    historical-fetch bursts don't shed sample days when UW Basic's burst
+    window is briefly saturated."""
+    import time as _time
     url = f"{BASE}{path}"
     headers = {
         "Accept": "application/json",
         "Authorization": f"Bearer {_get_key()}",
         "UW-CLIENT-API-ID": "100001",  # required per UW skill.md anti-hallucination protocol
     }
-    try:
-        r = requests.get(url, headers=headers, params=params, timeout=TIMEOUT_S)
-    except requests.RequestException as e:
-        raise UWError(f"network error calling {path}: {e}") from e
-    if r.status_code == 429:
-        raise UWError(f"429 rate limited on {path}")
-    if not r.ok:
-        raise UWError(f"{r.status_code} on {path}: {r.text[:200]}")
-    return r.json()
+    last_status = None
+    for attempt, delay in enumerate((0,) + _429_RETRY_DELAYS_S):
+        if delay:
+            _time.sleep(delay)
+        try:
+            r = requests.get(url, headers=headers, params=params, timeout=TIMEOUT_S)
+        except requests.RequestException as e:
+            raise UWError(f"network error calling {path}: {e}") from e
+        if r.status_code == 429:
+            last_status = 429
+            continue  # retry after next delay
+        if not r.ok:
+            raise UWError(f"{r.status_code} on {path}: {r.text[:200]}")
+        return r.json()
+    # All retries exhausted
+    raise UWError(f"429 rate limited on {path} after {len(_429_RETRY_DELAYS_S)} retries")
 
 
 # ---------- Endpoint methods ----------
