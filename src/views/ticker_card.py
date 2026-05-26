@@ -7,6 +7,87 @@ import streamlit as st
 from src import charts, fetch, uw_client
 
 
+# Per-metric interpretation table for the percentile-dashboard explanation
+# block. Each metric has display label + what it MEANS for that metric to be
+# unusually high or unusually low (the percentile alone is meaningless — pin
+# concentration high vs low has opposite implications from net-γ-below-spot
+# high vs low). Keyed by metric stem (matches pct_ctx field prefix).
+_PCTILE_METRIC_META: dict[str, dict[str, str]] = {
+    "concentration": {
+        "label": "Pin concentration",
+        "high": "γ is concentrated at one strike more than usual — pinning pressure is stronger than the recent window",
+        "low": "γ is spread across strikes more than usual — pinning pressure is weaker than the recent window",
+    },
+    "squeeze_above": {
+        "label": "Net γ above spot",
+        "high": "less negative than usual — LESS squeeze fuel above spot (dealers are less short γ above)",
+        "low": "more negative than usual — MORE squeeze fuel above spot (if price breaks up, dealer hedging amplifies the move)",
+    },
+    "squeeze_below": {
+        "label": "Net γ below spot",
+        "high": "less negative than usual — LESS squeeze fuel below spot",
+        "low": "more negative than usual — MORE squeeze fuel below spot (if price breaks down, dealer hedging amplifies the move)",
+    },
+    "net_premium": {
+        "label": "Net premium (call $ − put $)",
+        "high": "more bullish than usual — call premium outweighs put premium by more than recent days",
+        "low": "more bearish than usual — put premium outweighs call premium by more than recent days",
+    },
+    "skew": {
+        "label": "Flow skew",
+        "high": "flow is more one-sided than usual — higher consensus among options traders today",
+        "low": "flow is more balanced than usual — less directional conviction today",
+    },
+    "max_pain_distance_pct": {
+        "label": "Max-pain distance",
+        "high": "spot is further above max-pain than usual",
+        "low": "spot is further below max-pain than usual (or closer to it)",
+    },
+    "front_iv": {
+        "label": "Front-week IV",
+        "high": "premium is EXPENSIVE today vs the recent window — favorable for premium-SELLING structures",
+        "low": "premium is CHEAP today vs the recent window — favorable for premium-BUYING structures",
+    },
+    "term_spread_pts": {
+        "label": "Term-structure spread (front − 30d)",
+        "high": "more INVERTED than usual — market is pricing a near-term catalyst more strongly than recent days",
+        "low": "more contango than usual — less near-term catalyst pricing than recent days",
+    },
+}
+
+
+def _percentile_explanation_lines(pct_ctx: dict) -> list[str]:
+    """Return one markdown bullet per metric that has percentile data this
+    session. Each bullet calls out the zone (extreme high/low, quartile,
+    typical) AND what that means specifically for the metric, since the same
+    percentile means opposite things across different metrics."""
+    out: list[str] = []
+    for key, meta in _PCTILE_METRIC_META.items():
+        pct = pct_ctx.get(f"{key}_pct_7d")
+        n = pct_ctx.get(f"{key}_7d_sample_n")
+        if pct is None:
+            continue
+        pct_int = int(round(pct))
+        n_str = f"{int(n)}" if n else "?"
+        if pct >= 90:
+            zone = f"among the HIGHEST in the last {n_str} trading days"
+            meaning = meta["high"]
+        elif pct >= 75:
+            zone = f"top quartile vs the last {n_str} days"
+            meaning = meta["high"]
+        elif pct <= 10:
+            zone = f"among the LOWEST in the last {n_str} trading days"
+            meaning = meta["low"]
+        elif pct <= 25:
+            zone = f"bottom quartile vs the last {n_str} days"
+            meaning = meta["low"]
+        else:
+            zone = f"typical for this ticker (interquartile vs last {n_str} days)"
+            meaning = "today's reading is in line with recent days — no notable signal from percentile alone"
+        out.append(f"- **{meta['label']} — {pct_int}th percentile** ({zone}): {meaning}.")
+    return out
+
+
 def _friendly_error_message(ticker: str, raw: str) -> str:
     """Categorize the per-ticker UWError into a user-actionable message.
     Hides the exception class name from end users."""
@@ -171,6 +252,21 @@ def render(ticker: str, td: "fetch.TickerData", synthesis: str, patterns: dict):
             charts.percentile_dashboard_figure(pct_ctx_payload, ticker=ticker),
             width="stretch",
         )
+        # Beginner-friendly per-metric interpretation block. The dashboard
+        # tells you WHERE today sits; this block tells you what that POSITION
+        # means for each specific metric (high pin concentration ≠ high net γ
+        # below spot — opposite implications).
+        explanations = _percentile_explanation_lines(pct_ctx_payload)
+        if explanations:
+            with st.expander("How to read today's percentile dashboard", expanded=True):
+                st.markdown(
+                    "A percentile tells you where TODAY'S value ranks within this ticker's recent history. "
+                    "**50th** = median. **90th+** = today is among the highest in the window. **10th-** = among the lowest. "
+                    "Same percentile can mean OPPOSITE things across metrics — pinning concentration high = strong pin, "
+                    "but net γ below spot high = LESS squeeze fuel down. The bullets below translate each metric's "
+                    "percentile into what it actually means for trade-decision purposes.\n\n"
+                    + "\n".join(explanations)
+                )
 
     # Gamma chart + walkthrough
     st.plotly_chart(
